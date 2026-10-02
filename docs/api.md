@@ -33,6 +33,18 @@ Facts that can come from different upstream datasets MUST retain their own prove
 
 A component may have `null` timestamps when its source does not provide them, but the API MUST NOT substitute an unrelated component's timestamp.
 
+## Vehicle context
+Selected-vehicle facts must use explicit request context. v1 does not infer the vehicle from authentication state because guest use and deep links must behave identically.
+
+- `GET /parking/nearby`: `vehicle` is required.
+- `GET /parking/{id}`: `vehicle` is required.
+- `GET /parking/{id}/rates`: `vehicle` is required.
+- `GET /parking/{id}/realtime`: `vehicle` is required so returned/aggregated zones are scoped consistently.
+
+Supported v1 values: `YELLOW`, `RED`. Internal domain models may support additional vehicle types.
+
+If a selected-vehicle endpoint is called without `vehicle`, return a validation error. Do not silently choose a saved/default vehicle on the server.
+
 ## Nearby parameters
 Required: `lat`, `lng`, `vehicle`.
 
@@ -40,11 +52,31 @@ Optional: `radius`, `space_type`, `available_only`, `hourly_rate_max_twd`, `dail
 
 Defaults and limits:
 - `radius`: default 1500m. Supported MVP presets: 500m / 1km / 3km / 5km.
+- `available_only`: default `false`.
 - `include_unknown`: default `false`.
 - `limit`: default 20, maximum 100.
 - `cursor`: opaque continuation token returned by the previous page. Clients MUST NOT parse or modify it.
 
 `price_max` is intentionally not part of the v1 contract because a generic scalar is ambiguous for progressive, per-entry, daily, monthly, custom, or partially parsed rates.
+
+## `available_only` semantics
+`available_only=true` is conservative. A lot qualifies only if at least one otherwise-matching returned zone satisfies all of the following:
+
+1. `compatibility.status = ALLOWED`.
+2. Zone realtime `status = AVAILABLE`.
+3. `available` is a confirmed integer greater than `0`.
+4. The realtime fact is fresh according to that source's configured freshness policy (`freshness.status = FRESH`).
+
+The following do **not** satisfy `available_only=true`:
+- `FULL`, `UNKNOWN`, `CLOSED`, or `STALE` realtime status.
+- `AVAILABLE` with `available = 0`.
+- Missing realtime data.
+- Realtime data whose freshness cannot be established.
+- Availability belonging only to a nonmatching, `NOT_ALLOWED`, or `UNKNOWN` zone.
+
+`available_only=false` does not assert availability; it simply does not filter by realtime availability.
+
+Freshness thresholds are server/source configuration, not a client contract. The API exposes the resulting freshness state so clients never need to invent thresholds.
 
 ## Rate-filter semantics
 `hourly_rate_max_twd` compares only a confirmed, deterministic hourly-equivalent value for the selected vehicle and zone.
@@ -118,6 +150,9 @@ Each returned zone may include:
     "status": "AVAILABLE",
     "available": 8,
     "total": 20,
+    "freshness": {
+      "status": "FRESH"
+    },
     "provenance": {
       "source_id": 9,
       "source_type": "OPERATOR",
@@ -129,9 +164,41 @@ Each returned zone may include:
 }
 ```
 
-A lot-level `availability_summary`, when present, MUST aggregate only returned zones with `compatibility.status = ALLOWED` and zone-scoped realtime data. It MUST NOT include car-only, light-motorcycle-only, `NOT_ALLOWED`, or merely `UNKNOWN` zone counts.
+Zone freshness status is one of:
+- `FRESH`: usable as current availability under the configured source policy.
+- `STALE`: present but too old for current availability claims.
+- `UNKNOWN`: freshness cannot be established.
 
-If no `ALLOWED` returned zone has trustworthy zone-scoped realtime data, the lot-level availability summary MUST be `UNKNOWN` rather than borrowing counts from another zone.
+A lot-level `availability_summary`, when present, describes only returned zones with `compatibility.status = ALLOWED`. It MUST NOT include car-only, light-motorcycle-only, `NOT_ALLOWED`, or `UNKNOWN` zone counts.
+
+### Availability-summary coverage
+Numeric lot-level totals are allowed only with **complete coverage** of returned `ALLOWED` zones.
+
+Let:
+- `eligible_zone_count` = number of returned `ALLOWED` zones that belong to the selected-vehicle result.
+- `fresh_realtime_zone_count` = number of those zones having trustworthy `FRESH` zone-scoped realtime data with confirmed numeric counts.
+
+Coverage is:
+- `COMPLETE`: `eligible_zone_count > 0` and `fresh_realtime_zone_count == eligible_zone_count`.
+- `PARTIAL`: `0 < fresh_realtime_zone_count < eligible_zone_count`.
+- `NONE`: `fresh_realtime_zone_count == 0`.
+
+If coverage is `PARTIAL` or `NONE`:
+- `availability_summary.status` MUST be `UNKNOWN`.
+- `available` and `total` MUST be `null`.
+- Clients MUST use individual zone data for any partial facts and must not display a partial sum as the lot total.
+
+Only `coverage = COMPLETE` may expose numeric `available` / `total` at lot level.
+
+### Availability-summary freshness and provenance
+For `coverage = COMPLETE`, aggregate freshness is conservative:
+- `freshness.status = FRESH` only because every contributing zone is fresh.
+- `freshness.oldest_source_updated_at` is the minimum non-null `source_updated_at` among contributors; if any contributor lacks that timestamp, this field is `null`.
+- `freshness.oldest_fetched_at` is the minimum `fetched_at` among contributors.
+
+The aggregate MUST carry `contributing_sources`, a deduplicated list of provenance objects or source references for every contributing zone. Do not select a single source and pretend it represents all contributors.
+
+For `PARTIAL`/`NONE`, the aggregate still reports coverage counts, but numeric totals remain null.
 
 ## Rate summary and provenance
 Rate summaries are zone- and vehicle-scoped. A returned zone may contain:
@@ -204,6 +271,9 @@ Nearby is lot-oriented for map/list efficiency, but it retains the zone boundary
             "status": "AVAILABLE",
             "available": 8,
             "total": 20,
+            "freshness": {
+              "status": "FRESH"
+            },
             "provenance": {
               "source_id": 9,
               "source_type": "OPERATOR",
@@ -232,13 +302,50 @@ Nearby is lot-oriented for map/list efficiency, but it retains the zone boundary
         "status": "AVAILABLE",
         "available": 8,
         "total": 20,
-        "scope": "ALLOWED_RETURNED_ZONES"
+        "scope": "ALLOWED_RETURNED_ZONES",
+        "coverage": {
+          "status": "COMPLETE",
+          "eligible_zone_count": 1,
+          "fresh_realtime_zone_count": 1
+        },
+        "freshness": {
+          "status": "FRESH",
+          "oldest_source_updated_at": "2026-10-02T02:00:00Z",
+          "oldest_fetched_at": "2026-10-02T02:01:00Z"
+        },
+        "contributing_sources": [
+          {
+            "source_id": 9,
+            "source_type": "OPERATOR",
+            "source_updated_at": "2026-10-02T02:00:00Z",
+            "fetched_at": "2026-10-02T02:01:00Z",
+            "verified_at": null
+          }
+        ]
       }
     }
   ],
   "page": {
     "next_cursor": "opaque-token",
     "has_more": true
+  }
+}
+```
+
+For partial coverage, the lot summary must instead look like:
+
+```json
+{
+  "availability_summary": {
+    "status": "UNKNOWN",
+    "available": null,
+    "total": null,
+    "scope": "ALLOWED_RETURNED_ZONES",
+    "coverage": {
+      "status": "PARTIAL",
+      "eligible_zone_count": 2,
+      "fresh_realtime_zone_count": 1
+    }
   }
 }
 ```
@@ -265,13 +372,16 @@ On the final page:
 ```
 
 ## Parking detail response
-`GET /parking/{id}` MUST expose lot coordinates separately from entrance coordinates and retain zone-level facts.
+`GET /parking/{id}?vehicle=RED` MUST expose lot coordinates separately from entrance coordinates and return selected-vehicle compatibility/rate/realtime facts at zone level.
+
+`vehicle` is required. The endpoint MUST NOT guess the vehicle from login state. This keeps deep links, guest mode, and authenticated mode deterministic.
 
 At minimum:
 
 ```json
 {
   "id": 12345,
+  "vehicle": "RED",
   "name": "XX地下停車場",
   "location": {
     "lat": 25.0331,
@@ -287,7 +397,7 @@ At minimum:
         "lng": 121.5625
       },
       "entrance_type": "VEHICLE",
-      "heavy_motorcycle_access": true,
+      "heavy_motorcycle_access": "ALLOWED",
       "notes": null,
       "provenance": {
         "source_id": 11,
@@ -301,7 +411,20 @@ At minimum:
 }
 ```
 
-Navigation clients MUST prefer an entrance with `heavy_motorcycle_access=true`. If no confirmed heavy-motorcycle-accessible entrance exists, the UI must not imply that an unverified entrance is confirmed accessible. Falling back to the lot center is permitted only when no usable entrance coordinate exists, and should be identifiable as a fallback in client logic.
+Entrance heavy-motorcycle accessibility is tri-state:
+- `ALLOWED`: confirmed accessible by heavy motorcycles.
+- `NOT_ALLOWED`: confirmed inaccessible.
+- `UNKNOWN`: entrance coordinates are known but heavy-motorcycle accessibility is not verified.
+
+An unknown entrance MUST NOT be serialized as `NOT_ALLOWED` or `ALLOWED`.
+
+Navigation clients MUST prefer an entrance with `heavy_motorcycle_access = ALLOWED`. If none exists:
+1. The UI may show an `UNKNOWN` entrance as unverified, but MUST NOT imply confirmed access.
+2. A `NOT_ALLOWED` entrance must not be chosen as the navigation target for a heavy motorcycle.
+3. Falling back to the lot center is permitted only when no usable confirmed entrance coordinate exists, and should be identifiable as a fallback in client logic.
+
+## Rates and realtime detail endpoints
+`GET /parking/{id}/rates?vehicle=RED` and `GET /parking/{id}/realtime?vehicle=RED` require the same explicit selected-vehicle context and MUST retain zone IDs and component-level provenance. They must not return a vehicle-ambiguous lot-level projection.
 
 ## Cursor errors
 At minimum, v1 defines these stable error codes:

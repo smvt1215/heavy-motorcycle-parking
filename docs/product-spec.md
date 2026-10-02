@@ -52,6 +52,26 @@ A future feature for intentionally browsing known prohibited/non-parking locatio
 Support `FREE`, `HOURLY`, `PER_ENTRY`, `TIME_BLOCK`, `PROGRESSIVE`, `FLAT`, `DAILY`, `MONTHLY`, `CUSTOM`.
 Must handle free minutes, progressive rules, weekday/weekend/holiday periods, day/night periods, daily caps, and heavy motorcycles charged by car rate. Preserve raw rate text when parsing is incomplete.
 
+## Ranking policy
+Legality/applicability is a hard filter before ranking. A cheaper, closer, or apparently available option must never outrank a confirmed legal option by using facts from a `NOT_ALLOWED` or compatibility-`UNKNOWN` zone.
+
+For confirmed `ALLOWED` lots, v1 weighted ranking components are:
+- Distance: 35%
+- Availability: 25%
+- Price: 20%
+- Confidence/provenance quality: 15%
+- Entrance quality: 5%
+
+The backend normalizes these components deterministically and versions scoring semantics. Exact ordering/cursor mechanics are defined in `docs/api.md`.
+
+When `include_unknown=true`:
+- confirmed `ALLOWED` lots remain the first result group;
+- an `UNKNOWN` child zone cannot improve or worsen an ALLOWED lot's score;
+- unknown-only lots form a separate unverified group after confirmed results and are ordered by distance plus a stable ID tie-breaker;
+- unknown-only results do not receive confirmed availability/price/confidence boosts.
+
+No AI/LLM ranking is used in MVP.
+
 ## MVP non-goals
 No in-app turn-by-turn navigation, payment, monthly-rental marketplace, social feed/chat, AI ranking, CarPlay, Android Auto, or prohibited-location discovery mode.
 

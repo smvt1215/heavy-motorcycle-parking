@@ -36,85 +36,79 @@ Effective API compatibility is `ALLOWED`, `NOT_ALLOWED`, or `UNKNOWN`; database 
 ## Parking-rule precedence metadata
 `parking_rules` must carry enough normalized metadata for deterministic rule resolution rather than relying on row order, recency, or confidence.
 
-Required rule metadata:
+Required metadata:
 - `parking_id`
-- optional `zone_id` (`NULL` = lot-wide rule)
+- optional `zone_id` (`NULL` = lot-wide)
 - tri-state vehicle permission columns
 - `rule_kind`: `BASELINE` or `EXCEPTION`
-- `authority_priority`: integer; larger value means the adapter/source policy considers this rule more authoritative for legality
+- `authority_priority`: integer, larger = more authoritative under explicit adapter/source policy
 - `effective_from` / `effective_to`
-- optional schedule constraints (day type / local time window) when applicable
+- optional schedule constraints
 - `source_id`
-- source timestamps / verification timestamps
-- confidence as informational metadata, not conflict precedence
+- source/verification timestamps
+- confidence as descriptive metadata only
 
-Adapters must assign `rule_kind` and `authority_priority` from explicit source/adapter policy. They must not derive authority from fetch recency or model confidence.
+Adapters assign `rule_kind` and `authority_priority` from explicit source policy. Authority MUST NOT be inferred from recency or confidence.
 
 ### Effective-rule precedence
-For a selected zone, vehicle, and `evaluation_at`, resolve applicable rules in this order:
+For a selected zone, vehicle, and `evaluation_at`:
 1. Ignore inactive/out-of-window/out-of-schedule rules.
-2. Prefer zone-specific rules (`zone_id = selected zone`) over lot-wide rules (`zone_id IS NULL`).
+2. Prefer zone-specific rules over lot-wide rules.
 3. Within the winning scope, prefer `EXCEPTION` over `BASELINE`.
-4. Within the winning rule kind, keep only the highest `authority_priority`.
-5. Evaluate the selected vehicle permission across all rules remaining in that highest-precedence tier.
-   - all remaining rules agree on `TRUE` -> `ALLOWED`
-   - all remaining rules agree on `FALSE` -> `NOT_ALLOWED`
+4. Within the winning kind, keep only the highest `authority_priority`.
+5. Evaluate the selected-vehicle permission across **all** rules in that highest-precedence tier:
+   - every value non-null and all TRUE -> `ALLOWED`
+   - every value non-null and all FALSE -> `NOT_ALLOWED`
    - any TRUE/FALSE conflict -> `UNKNOWN`
-   - all remaining permissions are NULL -> `UNKNOWN`
-6. Do not fall back to a lower-precedence tier merely because the winning tier is NULL or conflicting. The conservative result is `UNKNOWN`.
+   - any mixture of NULL plus known TRUE/FALSE -> `UNKNOWN`
+   - all NULL -> `UNKNOWN`
+6. Do not fall back to a lower-precedence tier because the winning tier is missing/conflicting; the conservative result remains `UNKNOWN`.
 
-`source_updated_at`, `fetched_at`, ingestion order, database ID, and confidence MUST NOT break a legality conflict. Multiple versions of the same upstream logical rule should be deduplicated/upserted during ingestion; if contradictory highest-precedence facts still remain, the domain result is `UNKNOWN`.
+`source_updated_at`, `fetched_at`, ingestion order, database ID, and confidence MUST NOT break a legality conflict. Duplicate versions of the same logical upstream rule should be deduplicated/upserted during ingestion; if contradictory highest-precedence facts remain, return `UNKNOWN`.
 
 ## Entrance accessibility
-Heavy-motorcycle accessibility for an entrance is tri-state. The database may store this as a nullable boolean (`TRUE` = confirmed accessible, `FALSE` = confirmed inaccessible, `NULL` = unknown) or an equivalent explicit enum, but the API/domain state MUST preserve `ALLOWED` / `NOT_ALLOWED` / `UNKNOWN` without coercion.
+Heavy-motorcycle accessibility is tri-state. Store as nullable boolean or equivalent enum, but preserve `ALLOWED` / `NOT_ALLOWED` / `UNKNOWN` in the domain/API.
 
 ## Rate types
 `FREE`, `HOURLY`, `PER_ENTRY`, `TIME_BLOCK`, `PROGRESSIVE`, `FLAT`, `DAILY`, `MONTHLY`, `CUSTOM`.
-Rate rules support `ALL`, `WEEKDAY`, `WEEKEND`, `HOLIDAY`, `SPECIAL`, start/end time, minute ranges, amount, unit_minutes, max_amount.
+Rate rules support `ALL`, `WEEKDAY`, `WEEKEND`, `HOLIDAY`, `SPECIAL`, time windows, minute ranges, amount, unit_minutes, max_amount.
 
 ## Raw data/provenance
 Preserve original payloads and raw rate text. Parsed rate status: `PARSED`, `PARTIALLY_PARSED`, `RAW_ONLY`, `INVALID`.
-All normalized rule/rate/realtime/entrance records must retain source references and relevant timestamps.
+All normalized rule/rate/realtime/entrance records retain source references and relevant timestamps.
 
 ## Realtime availability status
 Availability condition and freshness are separate dimensions.
 
-Stored/current observation status is limited to:
-- `AVAILABLE`
-- `FULL`
-- `UNKNOWN`
-- `CLOSED`
-
-`STALE` is **not** an availability status. Aging data retains its last observed availability status while freshness is derived separately from timestamps and source policy.
+Observation status: `AVAILABLE`, `FULL`, `UNKNOWN`, `CLOSED`.
+`STALE` is not an availability status. Aging retains the last observed status while freshness is derived independently.
 
 Examples:
-- Last observation `AVAILABLE`, now too old -> availability status remains `AVAILABLE`, freshness = `STALE`.
-- Last observation `FULL`, fetch time missing -> availability status remains `FULL`, freshness = `UNKNOWN`.
+- last AVAILABLE, now too old -> availability AVAILABLE + freshness STALE
+- last FULL, fetch time missing -> availability FULL + freshness UNKNOWN
 
-Do not translate generic car availability into heavy-motorcycle availability unless the source/rule explicitly supports that interpretation.
+Do not translate generic car availability into heavy-motorcycle availability unless explicitly supported by source/rule semantics.
 
-Realtime is zone-scoped when the source supports zone-level facts. Store source timestamps needed to derive freshness (`source_updated_at`, `fetched_at`, and source reference). Freshness thresholds are source configuration and are evaluated by the service layer; do not overwrite raw timestamps or the last observed availability status with a derived freshness label.
+Realtime is zone-scoped when supported. Store `source_updated_at`, `fetched_at`, and source reference. Freshness thresholds are service/source configuration.
 
 ### Realtime numeric integrity
-Normalized `available_spaces` and `total_spaces` are nullable because upstream data can be incomplete, but whenever values are present they must satisfy database/application validation:
+Normalized `available_spaces` and `total_spaces` are nullable, but when present:
 - integer counts only
 - `available_spaces >= 0`
 - `total_spaces >= 0`
-- when both are non-null, `available_spaces <= total_spaces`
+- if both non-null, `available_spaces <= total_spaces`
 
-Use database `CHECK` constraints where practical for nonnegative counts and `available <= total` while preserving NULL for unknown source values. Invalid upstream records remain available in raw ingestion storage but must not be normalized into trustworthy realtime facts without validation/error handling.
+Use DB CHECK constraints where practical. Invalid upstream rows remain in raw ingestion evidence but are not trustworthy normalized facts.
 
-Status/count consistency is enforced by the domain/service validation used for current-availability and aggregate claims:
-- `AVAILABLE` requires confirmed `available_spaces > 0`
-- `FULL` requires confirmed `available_spaces = 0`
-- `CLOSED` requires confirmed `available_spaces = 0`
-- `UNKNOWN` is never a trustworthy numeric aggregate contributor
+Status/count consistency:
+- AVAILABLE requires confirmed `available_spaces > 0`
+- FULL requires confirmed `available_spaces = 0`
+- CLOSED requires confirmed `available_spaces = 0`
+- UNKNOWN never contributes to trustworthy numeric aggregation
 
-A normalized row may preserve `total_spaces = NULL` when capacity is genuinely unknown, but such a row cannot contribute to a COMPLETE lot-level numeric aggregate. COMPLETE coverage requires a confirmed valid `available_spaces` and `total_spaces` for every contributing returned `ALLOWED` zone.
+A row may retain `total_spaces=NULL`, but cannot contribute to a COMPLETE lot-level numeric aggregate. COMPLETE coverage requires valid known available and total counts for every returned ALLOWED zone plus FRESH freshness and non-null fetched_at.
 
-For current-availability claims and COMPLETE lot-level aggregates, the API requires `freshness.status = FRESH`; stale or unknown freshness cannot qualify even if the last observed availability status was `AVAILABLE`.
-
-Lot-level availability summaries are derived API projections, not independent source facts. Numeric lot totals may be emitted only when every returned `ALLOWED` zone has trustworthy fresh numeric realtime coverage with known valid totals. Partial/no coverage must not be persisted or presented as a complete lot total.
+Lot-level availability summaries are derived API projections, not independent source facts. Partial/no coverage must not be persisted or presented as complete totals.
 
 ## Migrations
-Alembic only. Every schema PR must test upgrade and downgrade from the supported baseline.
+Alembic only. Every schema PR tests upgrade and downgrade from the supported baseline.

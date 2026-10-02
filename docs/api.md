@@ -16,6 +16,32 @@ Base path: `/api/v1`.
 - `DELETE /favorites/{parking_id}`
 - `GET /me`
 
+## Authentication and authorization
+Public parking discovery endpoints may be used without authentication unless a later endpoint-specific requirement says otherwise.
+
+User-scoped endpoints require an authenticated user:
+- `GET /me`
+- `GET /favorites`
+- `POST /favorites`
+- `DELETE /favorites/{parking_id}`
+- authenticated report ownership/history operations when introduced
+
+The mobile client authenticates to the backend with an access token in the standard HTTP header:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+The backend validates the bearer token and derives the user identity from the validated token. Clients MUST NOT send an arbitrary user ID to select the owner of `/me` or `/favorites` data.
+
+Authorization rules:
+- missing, malformed, expired, revoked, or otherwise invalid credentials on an authenticated endpoint => `401 UNAUTHENTICATED`
+- valid credentials but insufficient permission for the requested operation => `403 FORBIDDEN`
+- favorites are always scoped to the authenticated user; one user MUST NOT read, create, or delete another user's favorites by manipulating request data
+- guest mode can use public parking/search/detail APIs but cannot use authenticated user-scoped endpoints
+
+Apple/Google/email sign-in may be implemented by the authentication subsystem in the user milestone. The parking API contract does not require clients to understand backend token internals; only the bearer access-token contract is stable for protected API calls.
+
 ## Vehicle context
 Selected-vehicle endpoints require an explicit `vehicle` query parameter.
 
@@ -103,7 +129,7 @@ Nearby policy:
 5. Compatibility filtering occurs before recommendation ranking.
 
 ### Lot-level compatibility rollup
-The lot-level `compatibility.status` in nearby results is a derived summary over the **returned zones for that lot**, while every zone keeps its own explicit state.
+The lot-level `compatibility.status` in nearby results is a derived summary over the returned zones for that lot, while every zone keeps its own explicit state.
 
 Derive deterministically:
 1. `ALLOWED` if at least one returned zone is `ALLOWED`.
@@ -135,7 +161,7 @@ Allowed values:
 - `UNKNOWN`
 - `CLOSED`
 
-`STALE` is **not** an availability status.
+`STALE` is not an availability status.
 
 When an observation ages, retain its last observed status and change only freshness. Example: an old observation can be `status=AVAILABLE` with `freshness.status=STALE`.
 
@@ -175,16 +201,22 @@ Realtime belongs to a parking zone whenever the source exposes zone-level data.
 }
 ```
 
-Trustworthy current numeric invariants:
-- `AVAILABLE` => confirmed `available > 0`.
-- `FULL` => confirmed `available = 0`.
-- `CLOSED` => confirmed `available = 0`; known physical `total` may remain present.
+Raw/source observations may be incomplete, but a realtime observation is a trustworthy numeric aggregate contributor only when all of the following hold:
+- status is one of `AVAILABLE`, `FULL`, `CLOSED`
+- `available` is a confirmed integer >= 0
+- `total` is a confirmed integer >= 0
+- `available <= total`
+- `AVAILABLE` requires `available > 0`
+- `FULL` requires `available = 0`
+- `CLOSED` requires `available = 0`
+- freshness is `FRESH`
+- provenance has non-null `fetched_at`
 
-Only observations with status `AVAILABLE`, `FULL`, or `CLOSED` may contribute to a COMPLETE lot-level numeric aggregate, and only when their counts satisfy the invariants above, freshness is `FRESH`, and `fetched_at` is non-null.
+A zone-level observation may still preserve `total=null` when upstream capacity is unknown, including a CLOSED observation, but such a row is not eligible for COMPLETE numeric lot coverage because a complete aggregate total cannot be derived safely.
 
-An observation with status `UNKNOWN` **never** contributes to `fresh_realtime_zone_count` or COMPLETE coverage, even if it happens to carry numeric fields and fresh timestamps. Treat those numeric fields as non-authoritative for aggregation.
+An observation with status `UNKNOWN` never contributes to `fresh_realtime_zone_count` or COMPLETE coverage, even if it happens to carry numeric fields and fresh timestamps. Treat those numeric fields as non-authoritative for aggregation.
 
-A record violating these rules cannot contribute to a COMPLETE lot-level aggregate.
+Negative counts, non-integer counts, `available > total`, missing totals, status/count contradictions, missing fetch time, or stale/unknown freshness all disqualify an observation from COMPLETE numeric aggregation.
 
 ## `available_only`
 `available_only=true` is conservative.
@@ -195,6 +227,8 @@ A lot qualifies only when at least one otherwise-matching zone has all of:
 - confirmed integer `available > 0`
 - freshness `FRESH`
 - non-null realtime `fetched_at`
+
+`available_only` does not require a known `total`; it answers whether a confirmed positive current available count exists. However, a zone with unknown/invalid total cannot contribute to a COMPLETE lot-level numeric total.
 
 The following do not qualify:
 - `FULL`, `UNKNOWN`, or `CLOSED` availability
@@ -210,9 +244,7 @@ The following do not qualify:
 
 Define:
 - `eligible_zone_count`: returned `ALLOWED` zones in the selected-vehicle result.
-- `fresh_realtime_zone_count`: those eligible zones whose realtime status is one of `AVAILABLE` / `FULL` / `CLOSED`, whose numeric counts satisfy the status invariants, whose freshness is `FRESH`, and whose `fetched_at` is non-null.
-
-An eligible zone with realtime status `UNKNOWN` is not counted as fresh realtime coverage, regardless of timestamps or numeric fields.
+- `fresh_realtime_zone_count`: those eligible zones whose realtime is a trustworthy numeric aggregate contributor under the rules above.
 
 Coverage:
 - `COMPLETE`: eligible > 0 and fresh count == eligible count.
@@ -225,7 +257,7 @@ For `PARTIAL` or `NONE`:
 - `total=null`
 - client MUST NOT present a partial child-zone sum as a complete lot total
 
-Only `COMPLETE` may expose numeric lot totals.
+Only `COMPLETE` may expose numeric lot totals. Because contributor eligibility requires a confirmed `total`, every COMPLETE contributor has both a confirmed `available` and `total` count.
 
 ### COMPLETE aggregate status
 After validating all contributing zone observations:
@@ -319,14 +351,17 @@ When `hourly_rate_max_twd` is supplied, a zone qualifies only when `comparison_e
 
 `daily_max_required=true` requires a confirmed daily cap for at least one otherwise-matching `ALLOWED` zone.
 
-## Nearby processing order
+## Nearby processing and ranking
 1. Resolve effective rules for selected vehicle/time.
 2. Apply compatibility at zone level.
 3. Apply space-type, operating/realtime, price, and other request filters to zones.
 4. Retain matching zones per lot; never substitute facts from nonmatching zones.
 5. Derive lot-level compatibility from the retained zones using the rollup rules above.
-6. Rank remaining applicable lots using selected-vehicle/matching-zone facts only.
-7. Apply keyset pagination.
+6. Rank confirmed (`ALLOWED`) lots using facts from returned `ALLOWED` zones only. Returned `UNKNOWN` zones MUST NOT improve or worsen a confirmed lot's availability, price, confidence, or other zone-derived ranking inputs.
+7. When `include_unknown=true`, unknown-only lots form a separate unverified result group after confirmed ALLOWED lots. They MUST NOT receive confirmed-availability or confirmed-price ranking boosts from UNKNOWN zones; v1 orders this unverified group by distance, then stable parking ID.
+8. Apply keyset pagination over the resulting deterministic order.
+
+This prevents a cheap/available but unverified UNKNOWN zone from making an otherwise expensive/full confirmed ALLOWED option rank artificially better.
 
 ## Nearby response
 Nearby is lot-oriented for map/list efficiency but preserves the zone boundary.
@@ -440,5 +475,20 @@ Use one consistent JSON error shape with stable machine-readable code, human-rea
 }
 ```
 
+Authentication errors use the same envelope, for example:
+
+```json
+{
+  "error": {
+    "code": "UNAUTHENTICATED",
+    "message": "Authentication is required."
+  }
+}
+```
+
+Stable authorization codes include:
+- `UNAUTHENTICATED` with HTTP 401
+- `FORBIDDEN` with HTTP 403
+
 ## OpenAPI
-FastAPI-generated OpenAPI is required and must remain consistent with tests. Breaking changes require `/api/v2` rather than silently changing v1 contracts.
+FastAPI-generated OpenAPI is required and must remain consistent with tests. Protected operations MUST declare the bearer security scheme in OpenAPI. Breaking changes require `/api/v2` rather than silently changing v1 contracts.

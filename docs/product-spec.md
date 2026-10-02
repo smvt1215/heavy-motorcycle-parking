@@ -20,6 +20,21 @@ Four-type classification is descriptive, not the only authority. Explicit per-ve
 ## Vehicle types
 `GREEN`, `WHITE`, `YELLOW`, `RED`, `CAR`.
 
+## Compatibility states
+Vehicle compatibility is tri-state and must remain explicit end-to-end:
+- `ALLOWED`: confirmed allowed for the selected vehicle.
+- `NOT_ALLOWED`: confirmed not allowed.
+- `UNKNOWN`: permission cannot currently be verified.
+
+MVP behavior for yellow/red users:
+- Normal map/search results include `ALLOWED` parking only.
+- `NOT_ALLOWED` parking is excluded from normal results.
+- `UNKNOWN` parking is excluded by default, but may be displayed when the user enables an explicit "顯示未確認停車位置" option.
+- When shown, `UNKNOWN` locations must be labeled `尚未確認` and must never use the same visual or wording as confirmed legal parking.
+- `UNKNOWN` must never be silently converted to `NOT_ALLOWED` or `ALLOWED`.
+
+The unverified-location option exists to support discovery and community correction without misleading riders about legality.
+
 ## Required parking information
 - 合法性與 reason
 - Parking zone / space type
@@ -38,4 +53,4 @@ Must handle free minutes, progressive rules, weekday/weekend/holiday periods, da
 No in-app turn-by-turn navigation, payment, monthly-rental marketplace, social feed/chat, AI ranking, CarPlay, or Android Auto.
 
 ## Definition of Done
-User selects RED, searches `台北101`, sees only applicable heavy-motorcycle parking options, compares distance/availability/rates, opens details with source and entrance, then launches Apple Maps or Google Maps to the entrance.
+User selects RED, searches `台北101`, sees confirmed applicable heavy-motorcycle parking options, compares distance/availability/rates, opens details with source and entrance, then launches Apple Maps or Google Maps to the entrance. If the user explicitly enables unverified locations, any returned `UNKNOWN` result is clearly labeled and cannot be mistaken for confirmed legal parking.

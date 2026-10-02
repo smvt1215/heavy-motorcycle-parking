@@ -102,6 +102,17 @@ Nearby policy:
 4. With `include_unknown=true`, `UNKNOWN` zones may be returned but remain explicitly `UNKNOWN` and must be presented as unverified.
 5. Compatibility filtering occurs before recommendation ranking.
 
+### Lot-level compatibility rollup
+The lot-level `compatibility.status` in nearby results is a derived summary over the **returned zones for that lot**, while every zone keeps its own explicit state.
+
+Derive deterministically:
+1. `ALLOWED` if at least one returned zone is `ALLOWED`.
+2. Otherwise `UNKNOWN` if at least one returned zone is `UNKNOWN` (possible only when `include_unknown=true`).
+3. A lot with no returned zones is omitted from the nearby result set.
+4. `NOT_ALLOWED` is never produced as the nearby lot-level rollup because known `NOT_ALLOWED` zones are filtered out before the lot is emitted.
+
+Therefore a lot containing one returned `ALLOWED` zone and one returned `UNKNOWN` zone has lot-level status `ALLOWED`, while the unknown child zone remains explicitly `UNKNOWN`.
+
 ```json
 {
   "compatibility": {
@@ -169,7 +180,11 @@ Trustworthy current numeric invariants:
 - `FULL` => confirmed `available = 0`.
 - `CLOSED` => confirmed `available = 0`; known physical `total` may remain present.
 
-A record violating these invariants cannot contribute to a COMPLETE lot-level aggregate.
+Only observations with status `AVAILABLE`, `FULL`, or `CLOSED` may contribute to a COMPLETE lot-level numeric aggregate, and only when their counts satisfy the invariants above, freshness is `FRESH`, and `fetched_at` is non-null.
+
+An observation with status `UNKNOWN` **never** contributes to `fresh_realtime_zone_count` or COMPLETE coverage, even if it happens to carry numeric fields and fresh timestamps. Treat those numeric fields as non-authoritative for aggregation.
+
+A record violating these rules cannot contribute to a COMPLETE lot-level aggregate.
 
 ## `available_only`
 `available_only=true` is conservative.
@@ -195,7 +210,9 @@ The following do not qualify:
 
 Define:
 - `eligible_zone_count`: returned `ALLOWED` zones in the selected-vehicle result.
-- `fresh_realtime_zone_count`: those zones with trustworthy numeric realtime, freshness `FRESH`, and non-null `fetched_at`.
+- `fresh_realtime_zone_count`: those eligible zones whose realtime status is one of `AVAILABLE` / `FULL` / `CLOSED`, whose numeric counts satisfy the status invariants, whose freshness is `FRESH`, and whose `fetched_at` is non-null.
+
+An eligible zone with realtime status `UNKNOWN` is not counted as fresh realtime coverage, regardless of timestamps or numeric fields.
 
 Coverage:
 - `COMPLETE`: eligible > 0 and fresh count == eligible count.
@@ -254,7 +271,15 @@ Example:
       "oldest_source_updated_at": "2026-10-02T02:00:00Z",
       "oldest_fetched_at": "2026-10-02T02:01:00Z"
     },
-    "contributing_sources": []
+    "contributing_sources": [
+      {
+        "source_id": 9,
+        "source_type": "OPERATOR",
+        "source_updated_at": "2026-10-02T02:00:00Z",
+        "fetched_at": "2026-10-02T02:01:00Z",
+        "verified_at": null
+      }
+    ]
   }
 }
 ```
@@ -299,8 +324,9 @@ When `hourly_rate_max_twd` is supplied, a zone qualifies only when `comparison_e
 2. Apply compatibility at zone level.
 3. Apply space-type, operating/realtime, price, and other request filters to zones.
 4. Retain matching zones per lot; never substitute facts from nonmatching zones.
-5. Rank remaining applicable lots using selected-vehicle/matching-zone facts only.
-6. Apply keyset pagination.
+5. Derive lot-level compatibility from the retained zones using the rollup rules above.
+6. Rank remaining applicable lots using selected-vehicle/matching-zone facts only.
+7. Apply keyset pagination.
 
 ## Nearby response
 Nearby is lot-oriented for map/list efficiency but preserves the zone boundary.

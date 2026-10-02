@@ -33,6 +33,38 @@
 
 Effective API compatibility is `ALLOWED`, `NOT_ALLOWED`, or `UNKNOWN`; database NULL must remain distinguishable from confirmed false.
 
+## Parking-rule precedence metadata
+`parking_rules` must carry enough normalized metadata for deterministic rule resolution rather than relying on row order, recency, or confidence.
+
+Required rule metadata:
+- `parking_id`
+- optional `zone_id` (`NULL` = lot-wide rule)
+- tri-state vehicle permission columns
+- `rule_kind`: `BASELINE` or `EXCEPTION`
+- `authority_priority`: integer; larger value means the adapter/source policy considers this rule more authoritative for legality
+- `effective_from` / `effective_to`
+- optional schedule constraints (day type / local time window) when applicable
+- `source_id`
+- source timestamps / verification timestamps
+- confidence as informational metadata, not conflict precedence
+
+Adapters must assign `rule_kind` and `authority_priority` from explicit source/adapter policy. They must not derive authority from fetch recency or model confidence.
+
+### Effective-rule precedence
+For a selected zone, vehicle, and `evaluation_at`, resolve applicable rules in this order:
+1. Ignore inactive/out-of-window/out-of-schedule rules.
+2. Prefer zone-specific rules (`zone_id = selected zone`) over lot-wide rules (`zone_id IS NULL`).
+3. Within the winning scope, prefer `EXCEPTION` over `BASELINE`.
+4. Within the winning rule kind, keep only the highest `authority_priority`.
+5. Evaluate the selected vehicle permission across all rules remaining in that highest-precedence tier.
+   - all remaining rules agree on `TRUE` -> `ALLOWED`
+   - all remaining rules agree on `FALSE` -> `NOT_ALLOWED`
+   - any TRUE/FALSE conflict -> `UNKNOWN`
+   - all remaining permissions are NULL -> `UNKNOWN`
+6. Do not fall back to a lower-precedence tier merely because the winning tier is NULL or conflicting. The conservative result is `UNKNOWN`.
+
+`source_updated_at`, `fetched_at`, ingestion order, database ID, and confidence MUST NOT break a legality conflict. Multiple versions of the same upstream logical rule should be deduplicated/upserted during ingestion; if contradictory highest-precedence facts still remain, the domain result is `UNKNOWN`.
+
 ## Entrance accessibility
 Heavy-motorcycle accessibility for an entrance is tri-state. The database may store this as a nullable boolean (`TRUE` = confirmed accessible, `FALSE` = confirmed inaccessible, `NULL` = unknown) or an equivalent explicit enum, but the API/domain state MUST preserve `ALLOWED` / `NOT_ALLOWED` / `UNKNOWN` without coercion.
 

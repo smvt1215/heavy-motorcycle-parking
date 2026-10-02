@@ -81,6 +81,25 @@ Rule/compatibility, rate, realtime, and entrance facts may come from different d
 
 Do not substitute an unrelated component's timestamp. For realtime, non-null `fetched_at` is required before freshness may be `FRESH`.
 
+## Effective parking-rule resolution
+Compatibility is resolved deterministically for `(parking_id, zone_id, vehicle, evaluation_at)`.
+
+Applicable rules are filtered by effective date/time and local schedule first, then precedence is:
+1. zone-specific rule over lot-wide rule
+2. `EXCEPTION` over `BASELINE`
+3. highest `authority_priority`
+4. evaluate all rules tied in that highest-precedence tier
+
+Highest-tier outcomes:
+- all selected-vehicle permissions TRUE => `ALLOWED`
+- all FALSE => `NOT_ALLOWED`
+- any TRUE/FALSE conflict => `UNKNOWN`
+- all NULL => `UNKNOWN`
+
+Do **not** fall back to a lower-precedence tier when the winning tier is conflicting or NULL. `source_updated_at`, `fetched_at`, row ID/order, and confidence MUST NOT break a legality conflict. Confidence is descriptive only.
+
+Adapters/source policy own `rule_kind` and `authority_priority`; they must not derive authority from recency or model confidence.
+
 ## Nearby request
 `GET /parking/nearby`
 
@@ -140,6 +159,71 @@ Lot-level nearby compatibility is derived only from returned zones:
 4. Nearby lot-level `NOT_ALLOWED` is never emitted because known prohibited zones are filtered first.
 
 Thus ALLOWED+UNKNOWN => lot ALLOWED while the child UNKNOWN remains UNKNOWN.
+
+## Zone wire schema
+Every parking endpoint that exposes selected-vehicle zone facts uses the same zone member contract. Fields may be `null` only where explicitly allowed below; omitting a fact is not equivalent to `UNKNOWN`.
+
+```json
+{
+  "zone_id": 20,
+  "name": "B2 大重機區",
+  "space_type": "HEAVY_ONLY",
+  "capacity": 20,
+  "compatibility": {
+    "status": "ALLOWED",
+    "vehicle": "RED",
+    "reason": "explicit_vehicle_permission",
+    "confidence": 1.0,
+    "provenance": {
+      "source_id": 4,
+      "source_type": "GOVERNMENT",
+      "source_updated_at": "2026-10-02T01:50:00Z",
+      "fetched_at": "2026-10-02T01:51:00Z",
+      "verified_at": null
+    }
+  },
+  "rate_summary": {
+    "display_text": "20元/小時・最高100元/日",
+    "comparison_eligible": true,
+    "comparison_hourly_rate_twd": 20,
+    "daily_max_twd": 100,
+    "parse_status": "PARSED",
+    "provenance": {
+      "source_id": 7,
+      "source_type": "GOVERNMENT",
+      "source_updated_at": "2026-10-01T00:00:00Z",
+      "fetched_at": "2026-10-02T01:00:00Z",
+      "verified_at": null
+    }
+  },
+  "availability": {
+    "status": "AVAILABLE",
+    "available": 8,
+    "total": 20,
+    "freshness": {
+      "status": "FRESH"
+    },
+    "provenance": {
+      "source_id": 9,
+      "source_type": "OPERATOR",
+      "source_updated_at": "2026-10-02T02:00:00Z",
+      "fetched_at": "2026-10-02T02:01:00Z",
+      "verified_at": null
+    }
+  }
+}
+```
+
+Required zone fields:
+- `zone_id`: stable numeric zone identifier
+- `name`: nullable display name
+- `space_type`: one of `HEAVY_ONLY`, `MOTO_SHARED`, `CAR_SHARED`, `LIGHT_MOTO_ONLY`
+- `capacity`: nullable known physical capacity
+- `compatibility`: always present for selected-vehicle endpoints; status is `ALLOWED` / `NOT_ALLOWED` / `UNKNOWN`
+- `rate_summary`: nullable when no applicable trustworthy/normalized rate summary exists
+- `availability`: nullable when no current/last realtime observation exists
+
+`rate_summary.provenance` and `availability.provenance` are independent of compatibility provenance. A rate/realtime fact from another zone MUST NOT be substituted into this member.
 
 ## Realtime model
 Availability observation status and freshness are separate dimensions.
@@ -302,14 +386,50 @@ A zone qualifies only when `comparison_eligible=true` and its comparison value <
 
 ## Nearby processing and ranking
 1. Resolve/pin `evaluation_at`; convert it to Asia/Taipei for scheduled rules/rates.
-2. Resolve effective rules for selected vehicle at that instant.
+2. Resolve effective parking rules using the deterministic precedence contract above.
 3. Apply compatibility at zone level.
 4. Apply space type, realtime/operating, rate, and request filters.
 5. Retain matching zones per lot; never substitute nonmatching-zone facts.
 6. Derive lot-level compatibility from retained zones.
 7. Rank confirmed ALLOWED lots using returned ALLOWED-zone facts only. UNKNOWN-zone price/availability/confidence MUST NOT improve or worsen an ALLOWED lot.
-8. With `include_unknown=true`, unknown-only lots form a separate unverified group after confirmed lots; v1 orders them by distance then stable parking ID and gives no confirmed price/availability boosts.
-9. Apply keyset pagination using the pinned evaluation instant and deterministic order.
+8. With `include_unknown=true`, unknown-only lots form a separate unverified group after confirmed lots.
+9. Apply keyset pagination using the pinned evaluation instant and ranking tuple below.
+
+### Confirmed-lot ranking tuple
+For v1, ranking is deterministic and server-computed. Confirmed ALLOWED lots use the weighted score defined by the product contract:
+- distance: 35%
+- availability: 25%
+- price: 20%
+- confidence: 15%
+- entrance quality: 5%
+
+Each component is normalized to a deterministic integer basis-point value `0..10000` by versioned server logic. Missing/unknown optional evidence contributes `0` for that component; it is never guessed. Compatibility/legal applicability is a hard filter before scoring, not a score component.
+
+Define:
+
+```text
+ranking_score_bp =
+  round(distance_component_bp * 0.35) +
+  round(availability_component_bp * 0.25) +
+  round(price_component_bp * 0.20) +
+  round(confidence_component_bp * 0.15) +
+  round(entrance_component_bp * 0.05)
+```
+
+Sort confirmed ALLOWED lots by the exact tuple:
+1. `ranking_group = 0`
+2. `ranking_score_bp DESC`
+3. `distance_m ASC`
+4. `parking_id ASC`
+
+Unknown-only lots returned via `include_unknown=true` use:
+1. `ranking_group = 1`
+2. `distance_m ASC`
+3. `parking_id ASC`
+
+Unknown-only results receive no confirmed-price/availability/confidence boosts.
+
+The scoring normalization algorithm is implementation-versioned as `sort_version`; changing its semantics requires a new `sort_version`, and old incompatible cursors return `CURSOR_VERSION_UNSUPPORTED` rather than being interpreted under new rules.
 
 ## Nearby response
 
@@ -323,8 +443,18 @@ A zone qualifies only when `comparison_eligible=true` and its comparison value <
       "distance_m": 420,
       "location": {"lat": 25.0331, "lng": 121.5628},
       "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
-      "zones": [],
-      "availability_summary": {}
+      "zones": [
+        {
+          "zone_id": 20,
+          "name": "B2 大重機區",
+          "space_type": "HEAVY_ONLY",
+          "capacity": 20,
+          "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
+          "rate_summary": null,
+          "availability": null
+        }
+      ],
+      "availability_summary": null
     }
   ],
   "page": {
@@ -338,11 +468,13 @@ A zone qualifies only when `comparison_eligible=true` and its comparison value <
 Nearby uses opaque keyset pagination.
 
 - client MUST NOT parse/modify cursors
-- cursor is bound to location, radius, vehicle, filters, **evaluation_at**, and sort version/keys
+- cursor is bound to location, radius, vehicle, filters, **evaluation_at**, and `sort_version`
 - first page without `at` pins server request-received time
 - continuation uses cursor-pinned evaluation_at rather than a new wall-clock time
 - changed query or conflicting `at` + old cursor => cursor error
-- deterministic sort includes stable parking ID tie-breaker
+- confirmed-lot cursor keys are `(ranking_group, ranking_score_bp, distance_m, parking_id)`
+- unknown-only cursor keys are `(ranking_group, distance_m, parking_id)`
+- server cursor encoding may contain a superset of those keys plus query fingerprint/version metadata, but clients never parse it
 
 Final page:
 
@@ -374,7 +506,17 @@ Cursor errors MUST NOT silently restart page one.
   "evaluation_at": "2026-10-02T09:30:00Z",
   "name": "XX地下停車場",
   "location": {"lat": 25.0331, "lng": 121.5628},
-  "zones": [],
+  "zones": [
+    {
+      "zone_id": 20,
+      "name": "B2 大重機區",
+      "space_type": "HEAVY_ONLY",
+      "capacity": 20,
+      "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
+      "rate_summary": null,
+      "availability": null
+    }
+  ],
   "entrances": [
     {
       "id": 301,
@@ -397,10 +539,66 @@ Navigation:
 3. NOT_ALLOWED is never selected for heavy-motorcycle navigation.
 4. Lot center is an explicit fallback only when no usable confirmed entrance coordinate exists.
 
-## Rates and realtime detail
-`GET /parking/{id}/rates?vehicle=RED&at=...` uses the same evaluation_at/timezone semantics for scheduled rates.
+## Rates endpoint response
+`GET /parking/{id}/rates?vehicle=RED&at=...` uses the same `evaluation_at`/timezone semantics and returns zone-scoped rate data:
 
-`GET /parking/{id}/realtime?vehicle=RED` retains zone IDs, selected-vehicle scope, component provenance, and the same availability/freshness model. Realtime freshness is evaluated as current data, not rewound by `at`.
+```json
+{
+  "parking_id": 12345,
+  "vehicle": "RED",
+  "evaluation_at": "2026-10-02T09:30:00Z",
+  "zones": [
+    {
+      "zone_id": 20,
+      "space_type": "HEAVY_ONLY",
+      "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
+      "rates": [
+        {
+          "rate_id": 901,
+          "rate_type": "HOURLY",
+          "currency": "TWD",
+          "base_amount": 20,
+          "unit_minutes": 60,
+          "free_minutes": 0,
+          "daily_max_twd": 100,
+          "description": "20元/小時，最高100元/日",
+          "parse_status": "PARSED",
+          "provenance": {}
+        }
+      ]
+    }
+  ]
+}
+```
+
+A rates response MUST NOT attach a zone's rate to another zone or hide compatibility context.
+
+## Realtime endpoint response
+`GET /parking/{id}/realtime?vehicle=RED` returns selected-vehicle zone context and current realtime observations:
+
+```json
+{
+  "parking_id": 12345,
+  "vehicle": "RED",
+  "zones": [
+    {
+      "zone_id": 20,
+      "space_type": "HEAVY_ONLY",
+      "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
+      "availability": {
+        "status": "AVAILABLE",
+        "available": 8,
+        "total": 20,
+        "freshness": {"status": "FRESH"},
+        "provenance": {}
+      }
+    }
+  ],
+  "availability_summary": null
+}
+```
+
+Realtime freshness is evaluated as current data, not rewound by `at`.
 
 ## Error envelope
 Use one JSON error shape with stable machine-readable code, human-readable message, and optional details/field errors.

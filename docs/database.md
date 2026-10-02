@@ -31,6 +31,11 @@
 ## Tri-state permissions
 `green_plate_allowed`, `white_plate_allowed`, `yellow_plate_allowed`, `red_plate_allowed`, `car_allowed` are nullable booleans. NULL means unknown.
 
+Effective API compatibility is `ALLOWED`, `NOT_ALLOWED`, or `UNKNOWN`; database NULL must remain distinguishable from confirmed false.
+
+## Entrance accessibility
+Heavy-motorcycle accessibility for an entrance is tri-state. The database may store this as a nullable boolean (`TRUE` = confirmed accessible, `FALSE` = confirmed inaccessible, `NULL` = unknown) or an equivalent explicit enum, but the API/domain state MUST preserve `ALLOWED` / `NOT_ALLOWED` / `UNKNOWN` without coercion.
+
 ## Rate types
 `FREE`, `HOURLY`, `PER_ENTRY`, `TIME_BLOCK`, `PROGRESSIVE`, `FLAT`, `DAILY`, `MONTHLY`, `CUSTOM`.
 Rate rules support `ALL`, `WEEKDAY`, `WEEKEND`, `HOLIDAY`, `SPECIAL`, start/end time, minute ranges, amount, unit_minutes, max_amount.
@@ -42,6 +47,10 @@ All normalized rule/rate/realtime/entrance records must retain source references
 ## Realtime status
 `AVAILABLE`, `FULL`, `UNKNOWN`, `CLOSED`, `STALE`.
 Do not translate generic car availability into heavy-motorcycle availability unless the source/rule explicitly supports that interpretation.
+
+Realtime is zone-scoped when the source supports zone-level facts. Store source timestamps needed to derive freshness (`source_updated_at`, `fetched_at`, and source reference). Freshness thresholds are source configuration and are evaluated by the service layer; do not overwrite raw timestamps with a derived freshness label.
+
+Lot-level availability summaries are derived API projections, not independent source facts. Numeric lot totals may be emitted only when every returned `ALLOWED` zone has trustworthy fresh numeric realtime coverage. Partial/no coverage must not be persisted or presented as a complete lot total.
 
 ## Migrations
 Alembic only. Every schema PR must test upgrade and downgrade from the supported baseline.

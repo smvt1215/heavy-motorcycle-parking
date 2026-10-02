@@ -33,6 +33,8 @@ Facts that can come from different upstream datasets MUST retain their own prove
 
 A component may have `null` timestamps when its source does not provide them, but the API MUST NOT substitute an unrelated component's timestamp.
 
+For realtime facts specifically, `fetched_at` is required for the fact to be considered `FRESH`. A realtime fact with missing `fetched_at` has `freshness.status = UNKNOWN` and cannot contribute to a COMPLETE lot-level availability aggregate.
+
 ## Vehicle context
 Selected-vehicle facts must use explicit request context. v1 does not infer the vehicle from authentication state because guest use and deep links must behave identically.
 
@@ -66,11 +68,13 @@ Defaults and limits:
 2. Zone realtime `status = AVAILABLE`.
 3. `available` is a confirmed integer greater than `0`.
 4. The realtime fact is fresh according to that source's configured freshness policy (`freshness.status = FRESH`).
+5. Realtime provenance has non-null `fetched_at`.
 
 The following do **not** satisfy `available_only=true`:
 - `FULL`, `UNKNOWN`, `CLOSED`, or `STALE` realtime status.
 - `AVAILABLE` with `available = 0`.
 - Missing realtime data.
+- Missing `fetched_at`.
 - Realtime data whose freshness cannot be established.
 - Availability belonging only to a nonmatching, `NOT_ALLOWED`, or `UNKNOWN` zone.
 
@@ -165,9 +169,17 @@ Each returned zone may include:
 ```
 
 Zone freshness status is one of:
-- `FRESH`: usable as current availability under the configured source policy.
+- `FRESH`: usable as current availability under the configured source policy; requires non-null `fetched_at`.
 - `STALE`: present but too old for current availability claims.
-- `UNKNOWN`: freshness cannot be established.
+- `UNKNOWN`: freshness cannot be established, including when `fetched_at` is missing.
+
+For a zone availability fact to participate in a COMPLETE numeric aggregate, its status must be one of `AVAILABLE`, `FULL`, or `CLOSED`, its freshness must be `FRESH`, its `fetched_at` must be non-null, and its numeric counts must be internally consistent. `UNKNOWN` or `STALE` zone availability never contributes to COMPLETE coverage.
+
+Zone-status/count invariants for trustworthy numeric aggregation:
+- `AVAILABLE` requires confirmed `available > 0`.
+- `FULL` requires confirmed `available = 0`.
+- `CLOSED` requires confirmed `available = 0`; `total` may remain the known physical capacity.
+- A record violating these invariants is not trustworthy current realtime and therefore cannot count toward COMPLETE coverage.
 
 A lot-level `availability_summary`, when present, describes only returned zones with `compatibility.status = ALLOWED`. It MUST NOT include car-only, light-motorcycle-only, `NOT_ALLOWED`, or `UNKNOWN` zone counts.
 
@@ -176,7 +188,7 @@ Numeric lot-level totals are allowed only with **complete coverage** of returned
 
 Let:
 - `eligible_zone_count` = number of returned `ALLOWED` zones that belong to the selected-vehicle result.
-- `fresh_realtime_zone_count` = number of those zones having trustworthy `FRESH` zone-scoped realtime data with confirmed numeric counts.
+- `fresh_realtime_zone_count` = number of those zones having trustworthy `FRESH` zone-scoped realtime data with confirmed numeric counts and non-null `fetched_at`.
 
 Coverage is:
 - `COMPLETE`: `eligible_zone_count > 0` and `fresh_realtime_zone_count == eligible_zone_count`.
@@ -190,11 +202,28 @@ If coverage is `PARTIAL` or `NONE`:
 
 Only `coverage = COMPLETE` may expose numeric `available` / `total` at lot level.
 
+### Availability-summary status for COMPLETE coverage
+When coverage is `COMPLETE`, derive the lot-level status deterministically from the contributing `ALLOWED` zones **after** validating the status/count invariants above:
+
+1. `AVAILABLE` if the summed `available` count is greater than `0` (equivalently, at least one contributing zone is `AVAILABLE`).
+2. Otherwise `CLOSED` if every contributing zone is `CLOSED`.
+3. Otherwise `FULL` if the summed `available` count is `0`, at least one contributing zone is `FULL`, and every remaining contributing zone is either `FULL` or `CLOSED`.
+4. Otherwise `UNKNOWN` as a defensive fallback; this indicates inconsistent/unrecognized source state and MUST NOT be presented as confirmed availability.
+
+Examples:
+- `AVAILABLE + FULL` -> `AVAILABLE`.
+- `AVAILABLE + CLOSED` -> `AVAILABLE`.
+- `FULL + FULL` -> `FULL`.
+- `FULL + CLOSED` -> `FULL`.
+- `CLOSED + CLOSED` -> `CLOSED`.
+
+Clients MUST consume this server-derived status and must not independently re-derive a different lot status.
+
 ### Availability-summary freshness and provenance
 For `coverage = COMPLETE`, aggregate freshness is conservative:
-- `freshness.status = FRESH` only because every contributing zone is fresh.
-- `freshness.oldest_source_updated_at` is the minimum non-null `source_updated_at` among contributors; if any contributor lacks that timestamp, this field is `null`.
-- `freshness.oldest_fetched_at` is the minimum `fetched_at` among contributors.
+- `freshness.status = FRESH` only because every contributing zone is fresh and has non-null `fetched_at`.
+- `freshness.oldest_source_updated_at` is the minimum `source_updated_at` among contributors only when **every** contributor has a non-null `source_updated_at`; otherwise this field is `null`.
+- `freshness.oldest_fetched_at` is the minimum `fetched_at` among contributors. Because non-null `fetched_at` is a prerequisite for `FRESH` and COMPLETE coverage, this value is always non-null for a COMPLETE aggregate.
 
 The aggregate MUST carry `contributing_sources`, a deduplicated list of provenance objects or source references for every contributing zone. Do not select a single source and pretend it represents all contributors.
 

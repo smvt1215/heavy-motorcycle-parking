@@ -44,11 +44,26 @@ Rate rules support `ALL`, `WEEKDAY`, `WEEKEND`, `HOLIDAY`, `SPECIAL`, start/end 
 Preserve original payloads and raw rate text. Parsed rate status: `PARSED`, `PARTIALLY_PARSED`, `RAW_ONLY`, `INVALID`.
 All normalized rule/rate/realtime/entrance records must retain source references and relevant timestamps.
 
-## Realtime status
-`AVAILABLE`, `FULL`, `UNKNOWN`, `CLOSED`, `STALE`.
+## Realtime availability status
+Availability condition and freshness are separate dimensions.
+
+Stored/current observation status is limited to:
+- `AVAILABLE`
+- `FULL`
+- `UNKNOWN`
+- `CLOSED`
+
+`STALE` is **not** an availability status. Aging data retains its last observed availability status while freshness is derived separately from timestamps and source policy.
+
+Examples:
+- Last observation `AVAILABLE`, now too old -> availability status remains `AVAILABLE`, freshness = `STALE`.
+- Last observation `FULL`, fetch time missing -> availability status remains `FULL`, freshness = `UNKNOWN`.
+
 Do not translate generic car availability into heavy-motorcycle availability unless the source/rule explicitly supports that interpretation.
 
-Realtime is zone-scoped when the source supports zone-level facts. Store source timestamps needed to derive freshness (`source_updated_at`, `fetched_at`, and source reference). Freshness thresholds are source configuration and are evaluated by the service layer; do not overwrite raw timestamps with a derived freshness label.
+Realtime is zone-scoped when the source supports zone-level facts. Store source timestamps needed to derive freshness (`source_updated_at`, `fetched_at`, and source reference). Freshness thresholds are source configuration and are evaluated by the service layer; do not overwrite raw timestamps or the last observed availability status with a derived freshness label.
+
+For current-availability claims and COMPLETE lot-level aggregates, the API requires `freshness.status = FRESH`; stale or unknown freshness cannot qualify even if the last observed availability status was `AVAILABLE`.
 
 Lot-level availability summaries are derived API projections, not independent source facts. Numeric lot totals may be emitted only when every returned `ALLOWED` zone has trustworthy fresh numeric realtime coverage. Partial/no coverage must not be persisted or presented as a complete lot total.
 

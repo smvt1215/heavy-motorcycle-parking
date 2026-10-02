@@ -17,35 +17,32 @@ Base path: `/api/v1`.
 - `GET /me`
 
 ## Authentication and authorization
-Public parking discovery endpoints may be used without authentication unless a later endpoint-specific requirement says otherwise.
+Public parking discovery endpoints are usable without authentication unless an endpoint explicitly states otherwise.
 
-User-scoped endpoints require an authenticated user:
+Protected user-scoped endpoints:
 - `GET /me`
 - `GET /favorites`
 - `POST /favorites`
 - `DELETE /favorites/{parking_id}`
 - authenticated report ownership/history operations when introduced
 
-The mobile client authenticates to the backend with an access token in the standard HTTP header:
+Clients authenticate with:
 
 ```http
 Authorization: Bearer <access_token>
 ```
 
-The backend validates the bearer token and derives the user identity from the validated token. Clients MUST NOT send an arbitrary user ID to select the owner of `/me` or `/favorites` data.
+The backend derives identity only from the validated token. Clients MUST NOT choose `/me` or `/favorites` ownership by supplying an arbitrary user ID.
 
-Authorization rules:
-- missing, malformed, expired, revoked, or otherwise invalid credentials on an authenticated endpoint => `401 UNAUTHENTICATED`
-- valid credentials but insufficient permission for the requested operation => `403 FORBIDDEN`
-- favorites are always scoped to the authenticated user; one user MUST NOT read, create, or delete another user's favorites by manipulating request data
-- guest mode can use public parking/search/detail APIs but cannot use authenticated user-scoped endpoints
+- missing/malformed/expired/revoked/invalid credentials => HTTP 401, code `UNAUTHENTICATED`
+- valid identity without required permission => HTTP 403, code `FORBIDDEN`
+- favorites are always scoped to the authenticated user
+- guest mode may use public parking/search/detail APIs but not protected user endpoints
 
-Apple/Google/email sign-in may be implemented by the authentication subsystem in the user milestone. The parking API contract does not require clients to understand backend token internals; only the bearer access-token contract is stable for protected API calls.
+Protected operations MUST declare the bearer security scheme in OpenAPI.
 
-## Vehicle context
-Selected-vehicle endpoints require an explicit `vehicle` query parameter.
-
-For v1 public/mobile parking flows, supported values are `YELLOW` and `RED`.
+## Vehicle and rule-evaluation context
+Selected-vehicle endpoints require explicit `vehicle`; v1 mobile/public parking flows support `YELLOW` and `RED`.
 
 Required on:
 - `GET /parking/nearby`
@@ -53,10 +50,22 @@ Required on:
 - `GET /parking/{id}/rates`
 - `GET /parking/{id}/realtime`
 
-The server MUST NOT infer a selected vehicle from login/profile state. Missing vehicle context is a validation error so guest, authenticated, and deep-link flows remain deterministic.
+The server MUST NOT infer the selected vehicle from login/profile state.
+
+Scheduled parking rules/rates are evaluated at one explicit absolute instant, `evaluation_at`.
+
+- Clients may supply optional `at=<RFC3339 timestamp with offset>` on nearby/detail/rates requests.
+- If `at` is omitted on the first nearby page, the server captures the request-received instant as `evaluation_at`.
+- The nearby response exposes that resolved `evaluation_at`.
+- Every continuation cursor is bound to the same `evaluation_at`; subsequent pages MUST NOT re-evaluate weekday/weekend/day/night rules using a newer clock time.
+- Supplying an `at` that conflicts with a cursor's pinned instant is a cursor/query mismatch.
+- Detail/rates responses likewise expose the resolved evaluation instant; when omitted they use that request's receive instant.
+- MVP rule/rate local-time interpretation is `Asia/Taipei` because v1 geography is Taipei/New Taipei. Convert the absolute evaluation instant to `Asia/Taipei` before applying weekday/weekend/holiday/time-of-day rules.
+
+Realtime freshness remains a current-observation concept and is evaluated by server/source freshness policy; `evaluation_at` does not make stale realtime historical data current.
 
 ## Provenance
-Facts that can come from different upstream datasets retain their own provenance. Rule/compatibility, rate, realtime, and entrance provenance MUST NOT be collapsed into one lot-level source.
+Rule/compatibility, rate, realtime, and entrance facts may come from different datasets and MUST retain separate provenance.
 
 ```json
 {
@@ -70,9 +79,7 @@ Facts that can come from different upstream datasets retain their own provenance
 }
 ```
 
-A timestamp may be null when the source does not provide it. The API MUST NOT substitute an unrelated component's timestamp.
-
-For realtime facts, non-null `fetched_at` is required before freshness may be `FRESH`.
+Do not substitute an unrelated component's timestamp. For realtime, non-null `fetched_at` is required before freshness may be `FRESH`.
 
 ## Nearby request
 `GET /parking/nearby`
@@ -89,6 +96,7 @@ Optional:
 - `hourly_rate_max_twd`
 - `daily_max_required`
 - `include_unknown`
+- `at`
 - `limit`
 - `cursor`
 
@@ -101,169 +109,127 @@ Defaults:
 
 Supported MVP radius presets: 500m / 1km / 3km / 5km.
 
-### Space-type filtering
-For YELLOW/RED parking search, `space_type` may narrow otherwise-compatible results to:
+### Space type
+For YELLOW/RED search, `space_type` may narrow compatible results to:
 - `HEAVY_ONLY`
 - `MOTO_SHARED`
 - `CAR_SHARED`
 
-`LIGHT_MOTO_ONLY` is known `NOT_ALLOWED` for YELLOW/RED and is not a normal v1 parking-search filter. The API has no generic override to include confirmed prohibited locations.
-
-`include_unknown=true` is only for compatibility `UNKNOWN`; it does not include `NOT_ALLOWED` zones.
-
-If a future product intentionally browses prohibited/non-parking locations, it must use a separately specified discovery mode rather than changing legal parking-search semantics.
+`LIGHT_MOTO_ONLY` is known `NOT_ALLOWED` for YELLOW/RED and is not a normal v1 parking-search filter. `include_unknown=true` includes compatibility `UNKNOWN`, never known `NOT_ALLOWED` locations. Any future prohibited-location browsing is a separate discovery mode.
 
 ## Compatibility
-Compatibility is three-state:
-- `ALLOWED`: selected vehicle is confirmed allowed.
-- `NOT_ALLOWED`: selected vehicle is confirmed prohibited.
-- `UNKNOWN`: permission cannot currently be verified.
+Zone compatibility is three-state:
+- `ALLOWED`
+- `NOT_ALLOWED`
+- `UNKNOWN`
 
 `UNKNOWN` MUST NOT be coerced to true/false.
 
 Nearby policy:
-1. `ALLOWED` zones are eligible for normal results and ranking.
+1. `ALLOWED` zones are eligible for normal results/ranking.
 2. `NOT_ALLOWED` zones are excluded.
 3. `UNKNOWN` zones are excluded by default.
-4. With `include_unknown=true`, `UNKNOWN` zones may be returned but remain explicitly `UNKNOWN` and must be presented as unverified.
-5. Compatibility filtering occurs before recommendation ranking.
+4. With `include_unknown=true`, UNKNOWN zones may be returned but remain explicitly unverified.
+5. Compatibility filtering precedes ranking.
 
-### Lot-level compatibility rollup
-The lot-level `compatibility.status` in nearby results is a derived summary over the returned zones for that lot, while every zone keeps its own explicit state.
+### Lot rollup
+Lot-level nearby compatibility is derived only from returned zones:
+1. `ALLOWED` if any returned zone is ALLOWED.
+2. Otherwise `UNKNOWN` if an UNKNOWN zone was explicitly returned.
+3. A lot with no returned zones is omitted.
+4. Nearby lot-level `NOT_ALLOWED` is never emitted because known prohibited zones are filtered first.
 
-Derive deterministically:
-1. `ALLOWED` if at least one returned zone is `ALLOWED`.
-2. Otherwise `UNKNOWN` if at least one returned zone is `UNKNOWN` (possible only when `include_unknown=true`).
-3. A lot with no returned zones is omitted from the nearby result set.
-4. `NOT_ALLOWED` is never produced as the nearby lot-level rollup because known `NOT_ALLOWED` zones are filtered out before the lot is emitted.
+Thus ALLOWED+UNKNOWN => lot ALLOWED while the child UNKNOWN remains UNKNOWN.
 
-Therefore a lot containing one returned `ALLOWED` zone and one returned `UNKNOWN` zone has lot-level status `ALLOWED`, while the unknown child zone remains explicitly `UNKNOWN`.
-
-```json
-{
-  "compatibility": {
-    "status": "UNKNOWN",
-    "vehicle": "RED",
-    "reason": "vehicle_permission_not_verified",
-    "confidence": null,
-    "provenance": null
-  }
-}
-```
-
-## Realtime availability model
+## Realtime model
 Availability observation status and freshness are separate dimensions.
 
-### Availability status
-Allowed values:
+Availability status:
 - `AVAILABLE`
 - `FULL`
 - `UNKNOWN`
 - `CLOSED`
 
-`STALE` is not an availability status.
-
-When an observation ages, retain its last observed status and change only freshness. Example: an old observation can be `status=AVAILABLE` with `freshness.status=STALE`.
-
-### Freshness status
-Allowed values:
+Freshness:
 - `FRESH`
 - `STALE`
 - `UNKNOWN`
 
-Rules:
-- `FRESH` requires non-null `fetched_at` and must satisfy the server/source freshness policy.
-- `STALE` means the observation exists but is too old for current-availability claims.
-- `UNKNOWN` means freshness cannot be established, including missing `fetched_at`.
+`STALE` is not an availability status. Aging preserves the last observation status and changes only freshness.
 
-Freshness thresholds are server/source configuration, not a client contract.
+Freshness rules:
+- `FRESH` requires non-null `fetched_at` and compliance with source/server freshness policy
+- `STALE` means an observation exists but is too old for current-availability claims
+- `UNKNOWN` includes missing/indeterminable fetch time
 
-### Zone-scoped realtime
-Realtime belongs to a parking zone whenever the source exposes zone-level data.
+Realtime is zone-scoped whenever the source supports zone-level facts.
 
-```json
-{
-  "availability": {
-    "status": "AVAILABLE",
-    "available": 8,
-    "total": 20,
-    "freshness": {
-      "status": "FRESH"
-    },
-    "provenance": {
-      "source_id": 9,
-      "source_type": "OPERATOR",
-      "source_updated_at": "2026-10-02T02:00:00Z",
-      "fetched_at": "2026-10-02T02:01:00Z",
-      "verified_at": null
-    }
-  }
-}
-```
+### Numeric integrity
+Raw/source observations may be incomplete. A trustworthy numeric observation must satisfy:
+- `available` is an integer >= 0 when present
+- `total` is an integer >= 0 when present
+- when both are present, `available <= total`
+- `AVAILABLE` requires confirmed `available > 0`
+- `FULL` requires confirmed `available = 0`
+- `CLOSED` requires confirmed `available = 0`
 
-Raw/source observations may be incomplete, but a realtime observation is a trustworthy numeric aggregate contributor only when all of the following hold:
-- status is one of `AVAILABLE`, `FULL`, `CLOSED`
-- `available` is a confirmed integer >= 0
-- `total` is a confirmed integer >= 0
-- `available <= total`
-- `AVAILABLE` requires `available > 0`
-- `FULL` requires `available = 0`
-- `CLOSED` requires `available = 0`
-- freshness is `FRESH`
-- provenance has non-null `fetched_at`
-
-A zone-level observation may still preserve `total=null` when upstream capacity is unknown, including a CLOSED observation, but such a row is not eligible for COMPLETE numeric lot coverage because a complete aggregate total cannot be derived safely.
-
-An observation with status `UNKNOWN` never contributes to `fresh_realtime_zone_count` or COMPLETE coverage, even if it happens to carry numeric fields and fresh timestamps. Treat those numeric fields as non-authoritative for aggregation.
-
-Negative counts, non-integer counts, `available > total`, missing totals, status/count contradictions, missing fetch time, or stale/unknown freshness all disqualify an observation from COMPLETE numeric aggregation.
+Impossible/invalid counts remain raw ingestion evidence but are not trustworthy normalized claims.
 
 ## `available_only`
-`available_only=true` is conservative.
-
-A lot qualifies only when at least one otherwise-matching zone has all of:
+`available_only=true` qualifies a lot only when at least one otherwise-matching zone has:
 - compatibility `ALLOWED`
 - availability status `AVAILABLE`
 - confirmed integer `available > 0`
 - freshness `FRESH`
-- non-null realtime `fetched_at`
+- non-null `fetched_at`
 
-`available_only` does not require a known `total`; it answers whether a confirmed positive current available count exists. However, a zone with unknown/invalid total cannot contribute to a COMPLETE lot-level numeric total.
+`total` may be null for this filter. However, **when `total` is supplied**, it MUST be a nonnegative integer and `available <= total`; otherwise the observation is internally invalid and does not qualify.
 
 The following do not qualify:
-- `FULL`, `UNKNOWN`, or `CLOSED` availability
-- status `AVAILABLE` with `available=0`
-- freshness `STALE` or `UNKNOWN`
-- missing freshness/realtime/fetched_at
-- availability from a nonmatching or non-ALLOWED zone
+- FULL / UNKNOWN / CLOSED status
+- AVAILABLE with `available=0`
+- invalid known total (`total<0`, non-integer, or `available>total`)
+- stale/unknown/missing freshness
+- missing realtime/fetched_at
+- nonmatching or non-ALLOWED zone
 
-`available_only=false` does not assert current availability; it simply does not filter by realtime.
+`available_only=false` simply does not filter by current availability.
 
 ## Lot-level availability summary
-`availability_summary` is a derived API projection over returned `ALLOWED` zones. It MUST NOT include car-only, light-motorcycle-only, `NOT_ALLOWED`, or compatibility-`UNKNOWN` zone counts.
+`availability_summary` is derived only from returned ALLOWED zones. It MUST NOT include car-only, light-motorcycle-only, NOT_ALLOWED, or compatibility-UNKNOWN counts.
+
+A zone is a trustworthy COMPLETE-coverage contributor only when:
+- realtime status is AVAILABLE / FULL / CLOSED (never UNKNOWN)
+- `available` and `total` are confirmed nonnegative integers
+- `available <= total`
+- status/count requirements above hold
+- freshness is FRESH
+- `fetched_at` is non-null
+
+A row may preserve `total=null` from upstream, but it cannot participate in COMPLETE numeric lot coverage.
 
 Define:
-- `eligible_zone_count`: returned `ALLOWED` zones in the selected-vehicle result.
-- `fresh_realtime_zone_count`: those eligible zones whose realtime is a trustworthy numeric aggregate contributor under the rules above.
+- `eligible_zone_count`: returned ALLOWED zones
+- `fresh_realtime_zone_count`: eligible zones satisfying all COMPLETE contributor requirements
 
 Coverage:
-- `COMPLETE`: eligible > 0 and fresh count == eligible count.
-- `PARTIAL`: 0 < fresh count < eligible count.
-- `NONE`: fresh count == 0.
+- `COMPLETE`: eligible > 0 and fresh count == eligible count
+- `PARTIAL`: 0 < fresh count < eligible count
+- `NONE`: fresh count == 0
 
-For `PARTIAL` or `NONE`:
-- summary status = `UNKNOWN`
+PARTIAL/NONE:
+- summary `status=UNKNOWN`
 - `available=null`
 - `total=null`
-- client MUST NOT present a partial child-zone sum as a complete lot total
+- client MUST NOT display a partial child-zone sum as a lot total
 
-Only `COMPLETE` may expose numeric lot totals. Because contributor eligibility requires a confirmed `total`, every COMPLETE contributor has both a confirmed `available` and `total` count.
+Only COMPLETE may expose numeric lot totals.
 
-### COMPLETE aggregate status
-After validating all contributing zone observations:
-1. `AVAILABLE` if summed `available > 0`.
-2. Else `CLOSED` if every contributor is `CLOSED`.
-3. Else `FULL` if available sum is 0, at least one contributor is `FULL`, and all others are `FULL` or `CLOSED`.
+### COMPLETE status
+After validating all contributors:
+1. `AVAILABLE` if summed available > 0.
+2. Else `CLOSED` if every contributor is CLOSED.
+3. Else `FULL` if summed available = 0, at least one contributor is FULL, and all others are FULL/CLOSED.
 4. Else `UNKNOWN` defensively.
 
 Examples:
@@ -273,16 +239,14 @@ Examples:
 - FULL + CLOSED => FULL
 - CLOSED + CLOSED => CLOSED
 
-Clients MUST consume the server-derived aggregate status rather than re-derive it.
+Clients consume this server-derived status rather than re-derive it.
 
-### COMPLETE aggregate freshness/provenance
+### COMPLETE freshness/provenance
 For COMPLETE coverage:
-- aggregate freshness = `FRESH`
+- aggregate freshness = FRESH
 - `oldest_source_updated_at` = minimum contributor value only if every contributor supplies it; otherwise null
-- `oldest_fetched_at` = minimum contributor `fetched_at`; it is non-null because non-null fetch time is required for COMPLETE coverage
-- `contributing_sources` contains deduplicated provenance for every contributor
-
-Do not select one child source/timestamp and represent it as the whole aggregate.
+- `oldest_fetched_at` = minimum contributor fetched_at
+- `contributing_sources` contains deduplicated provenance covering every contributor and is never empty when contributors exist
 
 Example:
 
@@ -317,57 +281,41 @@ Example:
 ```
 
 ## Rate filtering
-`price_max` is intentionally not part of v1 because a generic scalar is ambiguous across progressive, per-entry, daily, monthly, custom, or partially parsed rates.
+`price_max` is intentionally absent from v1 because it is ambiguous across rate models.
 
-`hourly_rate_max_twd` compares only a confirmed deterministic hourly-equivalent value for the selected vehicle and zone.
-
-A rate summary may expose:
-
-```json
-{
-  "rate_summary": {
-    "display_text": "20元/小時・最高100元/日",
-    "comparison_eligible": true,
-    "comparison_hourly_rate_twd": 20,
-    "daily_max_twd": 100,
-    "parse_status": "PARSED",
-    "provenance": {}
-  }
-}
-```
+`hourly_rate_max_twd` compares only a confirmed deterministic hourly-equivalent value for the selected vehicle/zone **at the pinned evaluation_at**.
 
 Eligible examples:
-- `FREE` => 0 TWD/hour
-- simple confirmed time-unit rate that converts exactly to one hour
+- FREE => 0 TWD/hour
+- simple confirmed time-unit rate exactly normalizable to one hour
 
-Not eligible without a future explicit normalization rule:
+Ineligible without a future explicit normalization rule:
 - progressive
 - per-entry
 - daily/monthly/custom
 - conflicting time schedules
-- partially parsed / raw-only
+- partially parsed/raw-only
 
-When `hourly_rate_max_twd` is supplied, a zone qualifies only when `comparison_eligible=true` and its comparison value is <= threshold. Do not guess.
+A zone qualifies only when `comparison_eligible=true` and its comparison value <= threshold. Never guess.
 
-`daily_max_required=true` requires a confirmed daily cap for at least one otherwise-matching `ALLOWED` zone.
+`daily_max_required=true` requires a confirmed daily cap for at least one otherwise-matching ALLOWED zone at the same evaluation instant.
 
 ## Nearby processing and ranking
-1. Resolve effective rules for selected vehicle/time.
-2. Apply compatibility at zone level.
-3. Apply space-type, operating/realtime, price, and other request filters to zones.
-4. Retain matching zones per lot; never substitute facts from nonmatching zones.
-5. Derive lot-level compatibility from the retained zones using the rollup rules above.
-6. Rank confirmed (`ALLOWED`) lots using facts from returned `ALLOWED` zones only. Returned `UNKNOWN` zones MUST NOT improve or worsen a confirmed lot's availability, price, confidence, or other zone-derived ranking inputs.
-7. When `include_unknown=true`, unknown-only lots form a separate unverified result group after confirmed ALLOWED lots. They MUST NOT receive confirmed-availability or confirmed-price ranking boosts from UNKNOWN zones; v1 orders this unverified group by distance, then stable parking ID.
-8. Apply keyset pagination over the resulting deterministic order.
-
-This prevents a cheap/available but unverified UNKNOWN zone from making an otherwise expensive/full confirmed ALLOWED option rank artificially better.
+1. Resolve/pin `evaluation_at`; convert it to Asia/Taipei for scheduled rules/rates.
+2. Resolve effective rules for selected vehicle at that instant.
+3. Apply compatibility at zone level.
+4. Apply space type, realtime/operating, rate, and request filters.
+5. Retain matching zones per lot; never substitute nonmatching-zone facts.
+6. Derive lot-level compatibility from retained zones.
+7. Rank confirmed ALLOWED lots using returned ALLOWED-zone facts only. UNKNOWN-zone price/availability/confidence MUST NOT improve or worsen an ALLOWED lot.
+8. With `include_unknown=true`, unknown-only lots form a separate unverified group after confirmed lots; v1 orders them by distance then stable parking ID and gives no confirmed price/availability boosts.
+9. Apply keyset pagination using the pinned evaluation instant and deterministic order.
 
 ## Nearby response
-Nearby is lot-oriented for map/list efficiency but preserves the zone boundary.
 
 ```json
 {
+  "evaluation_at": "2026-10-02T09:30:00Z",
   "items": [
     {
       "id": 12345,
@@ -375,16 +323,7 @@ Nearby is lot-oriented for map/list efficiency but preserves the zone boundary.
       "distance_m": 420,
       "location": {"lat": 25.0331, "lng": 121.5628},
       "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
-      "zones": [
-        {
-          "zone_id": 20,
-          "name": "B2 大重機區",
-          "space_type": "HEAVY_ONLY",
-          "compatibility": {},
-          "availability": {},
-          "rate_summary": {}
-        }
-      ],
+      "zones": [],
       "availability_summary": {}
     }
   ],
@@ -396,12 +335,14 @@ Nearby is lot-oriented for map/list efficiency but preserves the zone boundary.
 ```
 
 ## Pagination
-Nearby uses opaque keyset pagination, not offset pagination.
+Nearby uses opaque keyset pagination.
 
-- clients MUST NOT parse or modify cursors
-- cursors are bound to the effective query, including location, radius, vehicle, and filters
-- changed effective query + old cursor => cursor error
-- deterministic sort requires a stable tie-breaker such as parking ID
+- client MUST NOT parse/modify cursors
+- cursor is bound to location, radius, vehicle, filters, **evaluation_at**, and sort version/keys
+- first page without `at` pins server request-received time
+- continuation uses cursor-pinned evaluation_at rather than a new wall-clock time
+- changed query or conflicting `at` + old cursor => cursor error
+- deterministic sort includes stable parking ID tie-breaker
 
 Final page:
 
@@ -419,17 +360,18 @@ Stable cursor errors:
 - `CURSOR_QUERY_MISMATCH`
 - `CURSOR_VERSION_UNSUPPORTED`
 
-Cursor errors MUST NOT silently restart on page one.
+Cursor errors MUST NOT silently restart page one.
 
 ## Parking detail
-`GET /parking/{id}?vehicle=RED`
+`GET /parking/{id}?vehicle=RED&at=2026-10-02T09:30:00Z`
 
-The response exposes lot coordinates separately from entrance coordinates and keeps selected-vehicle facts at zone level.
+`at` is optional; response exposes resolved `evaluation_at`. Lot coordinates are separate from entrance coordinates and selected-vehicle facts stay zone-scoped.
 
 ```json
 {
   "id": 12345,
   "vehicle": "RED",
+  "evaluation_at": "2026-10-02T09:30:00Z",
   "name": "XX地下停車場",
   "location": {"lat": 25.0331, "lng": 121.5628},
   "zones": [],
@@ -447,24 +389,21 @@ The response exposes lot coordinates separately from entrance coordinates and ke
 }
 ```
 
-Entrance heavy-motorcycle accessibility is tri-state:
-- `ALLOWED`
-- `NOT_ALLOWED`
-- `UNKNOWN`
+Entrance heavy-motorcycle accessibility is ALLOWED / NOT_ALLOWED / UNKNOWN.
 
-Navigation behavior:
-1. Prefer an entrance with access `ALLOWED`.
-2. `UNKNOWN` may be shown as unverified but never as confirmed accessible.
-3. `NOT_ALLOWED` must never be selected as the heavy-motorcycle navigation target.
-4. Lot-center navigation is an explicit fallback only when no usable confirmed entrance coordinate exists.
+Navigation:
+1. Prefer ALLOWED entrance.
+2. UNKNOWN may be shown as unverified, never confirmed accessible.
+3. NOT_ALLOWED is never selected for heavy-motorcycle navigation.
+4. Lot center is an explicit fallback only when no usable confirmed entrance coordinate exists.
 
 ## Rates and realtime detail
-`GET /parking/{id}/rates?vehicle=RED` and `GET /parking/{id}/realtime?vehicle=RED` retain zone IDs, selected-vehicle scope, and component provenance.
+`GET /parking/{id}/rates?vehicle=RED&at=...` uses the same evaluation_at/timezone semantics for scheduled rates.
 
-The realtime endpoint uses the same separation of availability status (`AVAILABLE/FULL/UNKNOWN/CLOSED`) and freshness (`FRESH/STALE/UNKNOWN`) defined above.
+`GET /parking/{id}/realtime?vehicle=RED` retains zone IDs, selected-vehicle scope, component provenance, and the same availability/freshness model. Realtime freshness is evaluated as current data, not rewound by `at`.
 
 ## Error envelope
-Use one consistent JSON error shape with stable machine-readable code, human-readable message, and optional details/field errors.
+Use one JSON error shape with stable machine-readable code, human-readable message, and optional details/field errors.
 
 ```json
 {
@@ -475,20 +414,9 @@ Use one consistent JSON error shape with stable machine-readable code, human-rea
 }
 ```
 
-Authentication errors use the same envelope, for example:
-
-```json
-{
-  "error": {
-    "code": "UNAUTHENTICATED",
-    "message": "Authentication is required."
-  }
-}
-```
-
-Stable authorization codes include:
-- `UNAUTHENTICATED` with HTTP 401
-- `FORBIDDEN` with HTTP 403
+Stable auth codes:
+- `UNAUTHENTICATED` => HTTP 401
+- `FORBIDDEN` => HTTP 403
 
 ## OpenAPI
-FastAPI-generated OpenAPI is required and must remain consistent with tests. Protected operations MUST declare the bearer security scheme in OpenAPI. Breaking changes require `/api/v2` rather than silently changing v1 contracts.
+FastAPI-generated OpenAPI is required and must match tests. Protected operations declare the bearer scheme. Breaking v1 contract changes require `/api/v2` rather than silent mutation.

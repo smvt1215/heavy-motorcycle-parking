@@ -63,9 +63,26 @@ Do not translate generic car availability into heavy-motorcycle availability unl
 
 Realtime is zone-scoped when the source supports zone-level facts. Store source timestamps needed to derive freshness (`source_updated_at`, `fetched_at`, and source reference). Freshness thresholds are source configuration and are evaluated by the service layer; do not overwrite raw timestamps or the last observed availability status with a derived freshness label.
 
+### Realtime numeric integrity
+Normalized `available_spaces` and `total_spaces` are nullable because upstream data can be incomplete, but whenever values are present they must satisfy database/application validation:
+- integer counts only
+- `available_spaces >= 0`
+- `total_spaces >= 0`
+- when both are non-null, `available_spaces <= total_spaces`
+
+Use database `CHECK` constraints where practical for nonnegative counts and `available <= total` while preserving NULL for unknown source values. Invalid upstream records remain available in raw ingestion storage but must not be normalized into trustworthy realtime facts without validation/error handling.
+
+Status/count consistency is enforced by the domain/service validation used for current-availability and aggregate claims:
+- `AVAILABLE` requires confirmed `available_spaces > 0`
+- `FULL` requires confirmed `available_spaces = 0`
+- `CLOSED` requires confirmed `available_spaces = 0`
+- `UNKNOWN` is never a trustworthy numeric aggregate contributor
+
+A normalized row may preserve `total_spaces = NULL` when capacity is genuinely unknown, but such a row cannot contribute to a COMPLETE lot-level numeric aggregate. COMPLETE coverage requires a confirmed valid `available_spaces` and `total_spaces` for every contributing returned `ALLOWED` zone.
+
 For current-availability claims and COMPLETE lot-level aggregates, the API requires `freshness.status = FRESH`; stale or unknown freshness cannot qualify even if the last observed availability status was `AVAILABLE`.
 
-Lot-level availability summaries are derived API projections, not independent source facts. Numeric lot totals may be emitted only when every returned `ALLOWED` zone has trustworthy fresh numeric realtime coverage. Partial/no coverage must not be persisted or presented as a complete lot total.
+Lot-level availability summaries are derived API projections, not independent source facts. Numeric lot totals may be emitted only when every returned `ALLOWED` zone has trustworthy fresh numeric realtime coverage with known valid totals. Partial/no coverage must not be persisted or presented as a complete lot total.
 
 ## Migrations
 Alembic only. Every schema PR must test upgrade and downgrade from the supported baseline.

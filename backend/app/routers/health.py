@@ -11,6 +11,7 @@ from app.schemas.health import HealthResponse, VersionResponse
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["health"])
 
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
     db_status = "ok"
@@ -33,15 +34,9 @@ async def health_check():
 
     overall_status = "ok" if db_status == "ok" and redis_status == "ok" else "degraded"
 
-    return HealthResponse(
-        status=overall_status,
-        database=db_status,
-        redis=redis_status
-    )
+    return HealthResponse(status=overall_status, database=db_status, redis=redis_status)
+
 
 @router.get("/version", response_model=VersionResponse)
 async def version_check():
-    return VersionResponse(
-        version=settings.app_version,
-        environment=settings.environment
-    )
+    return VersionResponse(version=settings.app_version, environment=settings.environment)

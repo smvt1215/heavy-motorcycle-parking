@@ -6,6 +6,7 @@ class HealthResponse(BaseModel):
     database: str
     redis: str
 
+
 class VersionResponse(BaseModel):
     version: str
     environment: str

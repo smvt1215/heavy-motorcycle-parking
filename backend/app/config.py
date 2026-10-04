@@ -10,9 +10,7 @@ class Settings(BaseSettings):
     environment: Literal["DEV", "STAGING", "PROD"] = "DEV"
     debug: bool = False
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
 
 settings = Settings()

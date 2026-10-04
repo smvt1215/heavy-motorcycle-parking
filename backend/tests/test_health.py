@@ -10,6 +10,7 @@ async def test_version(async_client: AsyncClient):
     assert "version" in data
     assert "environment" in data
 
+
 @pytest.mark.asyncio
 async def test_health(async_client: AsyncClient):
     response = await async_client.get("/api/v1/health")

@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgis/postgis:18-3.6
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-heavy_parking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-heavy_parking}
+      POSTGRES_DB: ${POSTGRES_DB:-heavy_parking}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/10-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-heavy_parking}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "${API_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-heavy_parking}:${POSTGRES_PASSWORD:-heavy_parking}@db:5432/${POSTGRES_DB:-heavy_parking}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

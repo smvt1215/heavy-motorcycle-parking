@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:18-3.6
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+psycopg://test:test@localhost:5432/test
+      REDIS_URL: redis://localhost:6379/0
+      ENVIRONMENT: DEV
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -e ".[dev]"
+      - name: Lint
+        working-directory: backend
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Test
+        working-directory: backend
+        run: pytest tests/ -v
+
+  mobile:
+    name: Mobile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install dependencies
+        working-directory: mobile
+        run: flutter pub get
+      - name: Analyze
+        working-directory: mobile
+        run: flutter analyze
+      - name: Test
+        working-directory: mobile
+        run: flutter test

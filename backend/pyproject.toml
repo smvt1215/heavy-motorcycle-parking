@@ -1,0 +1,38 @@
+[tool.setuptools]
+packages = ["app"]
+
+[project]
+name = "heavy-parking-backend"
+version = "0.1.0"
+description = "Heavy Motorcycle Parking API"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic",
+    "psycopg[binary]",
+    "pydantic-settings",
+    "redis[hiredis]",
+    "httpx",
+    "geoalchemy2"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "ruff",
+    "mypy"
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

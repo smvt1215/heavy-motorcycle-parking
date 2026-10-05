@@ -1,5 +1,5 @@
-[tool.setuptools]
-packages = ["app"]
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [project]
 name = "heavy-parking-backend"
@@ -15,7 +15,8 @@ dependencies = [
     "pydantic-settings",
     "redis[hiredis]",
     "httpx",
-    "geoalchemy2"
+    "geoalchemy2",
+    "pyproj>=3.6"
 ]
 
 [project.optional-dependencies]

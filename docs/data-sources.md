@@ -8,6 +8,10 @@ Source API -> Downloader -> Raw storage -> City Adapter -> Normalizer -> Validat
 
 The mobile app must never call city government APIs directly.
 
+M4 implements the [Taipei V2 mapping and worker](taipei-ingestion.md), including
+verified endpoints, independent static/realtime sources, attribution, strict
+category evidence, replay commands and record-level failure inspection.
+
 ## Adapter contract
 Create `BaseParkingAdapter`, then `TaipeiParkingAdapter` and `NewTaipeiParkingAdapter`. City-specific parsing stays outside core domain logic.
 

@@ -175,6 +175,7 @@ class ParkingRepository:
                 total=row.total_spaces,
                 provenance=source_evidence(row, source),
                 freshness_seconds=source.freshness_seconds if source.freshness_seconds is not None else 120,
+                freshness_uses_source_timestamp=source.freshness_uses_source_timestamp,
             )
         entrances = defaultdict(list)
         statement = (

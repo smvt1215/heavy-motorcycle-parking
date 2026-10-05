@@ -1,0 +1,111 @@
+{
+  "data": {
+    "UPDATETIME": "Tue Oct 06 00:02:00 CST 2026",
+    "park": [
+      {
+        "id": "TPE0003",
+        "area": "松山區",
+        "name": "民生立體停車場",
+        "address": "民生東路5段84號",
+        "payex": "小型車：計時 30元/時，全程以半小時計，全日雙月票11,520元。",
+        "tw97x": "306457.778",
+        "tw97y": "2772361.517",
+        "totalcar": 457,
+        "totalmotor": 0,
+        "totallargemotor": "3",
+        "FareInfo": {
+          "FareRule": [
+            {"ParkingType": "C", "RateType": "1", "ChargeableSTime": "00", "ChargeableETime": "24", "ParkingRates": 30, "CUnit": ""}
+          ]
+        },
+        "EntranceCoord": {
+          "EntrancecoordInfo": [{"Xcod": "25.0585", "Ycod": "121.5596", "Address": "入口"}]
+        }
+      },
+      {
+        "id": "TPE9001",
+        "area": "大安區",
+        "name": "測試重機停車場",
+        "address": "測試路1號",
+        "payex": "汽車每小時40元；大型重機每小時20元，假日另計。",
+        "tw97x": 304500.0,
+        "tw97y": 2770000.0,
+        "totalcar": "20",
+        "totalmotor": 40,
+        "totallargemotor": "5",
+        "FareInfo": {
+          "FareRule": [
+            {"ParkingType": "C", "RateType": "1", "ChargeableSTime": "08", "ChargeableETime": "20", "ParkingRates": 40, "CUnit": ""},
+            {"ParkingType": "C", "RateType": "1", "ChargeableSTime": "08", "ChargeableETime": "20", "ParkingRates": 40, "CUnit": ""},
+            {"ParkingType": "C", "RateType": "1", "ChargeableSTime": "08", "ChargeableETime": "20", "ParkingRates": 50, "CUnit": ""},
+            {"ParkingType": "CM", "RateType": "2", "ChargeableSTime": "20", "ChargeableETime": "08", "ParkingRates": "60", "CUnit": ""},
+            {"ParkingType": "M", "RateType": "1", "ChargeableSTime": "00", "ChargeableETime": "24", "ParkingRates": "10", "CUnit": ""},
+            {"ParkingType": "HM", "RateType": "3", "ChargeableSTime": "", "ChargeableETime": "", "ParkingRates": "1500", "CUnit": ""},
+            {"ParkingType": "HM", "RateType": "1", "ChargeableSTime": "25", "ChargeableETime": "08", "ParkingRates": 20, "CUnit": ""},
+            {"ParkingType": "T", "RateType": "1", "ChargeableSTime": "00", "ChargeableETime": "24", "ParkingRates": 100, "CUnit": ""},
+            {"ParkingType": "C", "RateType": "9", "ChargeableSTime": "00", "ChargeableETime": "24", "ParkingRates": 8, "CUnit": ""}
+          ]
+        },
+        "EntranceCoord": {
+          "EntrancecoordInfo": [
+            {"Xcod": "25.0330", "Ycod": "121.5430", "Address": "主入口"},
+            {"Xcod": "0", "Ycod": "0", "Address": "後門"},
+            {"Xcod": "121.5430", "Ycod": "25.0330", "Address": "欄位對調"}
+          ]
+        }
+      },
+      {
+        "id": "TPE9002",
+        "area": "中山區",
+        "name": "缺機車數量測試場",
+        "address": "測試路2號",
+        "payex": "",
+        "tw97x": "303000",
+        "tw97y": "2772000",
+        "totalcar": 30,
+        "totallargemotor": "0",
+        "FareInfo": {
+          "FareRule": [
+            {"ParkingType": "CM", "RateType": "1", "ChargeableSTime": "00", "ChargeableETime": "24", "ParkingRates": 40, "CUnit": ""},
+            {"ParkingType": "M", "RateType": "1", "ChargeableSTime": "00", "ChargeableETime": "24", "ParkingRates": 10, "CUnit": ""}
+          ]
+        }
+      },
+      {
+        "id": "TPE9003",
+        "area": "信義區",
+        "name": "無支援車種測試場",
+        "address": "測試路3號",
+        "payex": "洽管理員",
+        "tw97x": "306000",
+        "tw97y": "2770500",
+        "totalcar": 0,
+        "totalmotor": "0",
+        "totallargemotor": "0"
+      },
+      {
+        "id": "TPE9004",
+        "area": "信義區",
+        "name": "小數容量測試場",
+        "address": "測試路4號",
+        "tw97x": "306000",
+        "tw97y": "2770500",
+        "totalcar": 10,
+        "totalmotor": 10,
+        "totallargemotor": "2.5"
+      },
+      {
+        "id": "TPE9005",
+        "area": "信義區",
+        "name": "座標錯誤測試場",
+        "address": "測試路5號",
+        "tw97x": "0",
+        "tw97y": "0",
+        "totalcar": 10,
+        "totalmotor": 0,
+        "totallargemotor": "0"
+      },
+      "not-a-record"
+    ]
+  }
+}

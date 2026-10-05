@@ -68,9 +68,9 @@ jobs:
       - name: Build API image
         run: docker build -t heavy-parking-api:ci backend
       - name: Smoke-test API image
-        run: >-
-          docker run --rm heavy-parking-api:ci python -c
-          "import app.main; import app.services; from app.domain.schedules import TAIPEI; print(TAIPEI)"
+        run: |
+          docker run --rm --workdir /tmp heavy-parking-api:ci python -c "import app.main; import app.services; import app.ingestion.taipei; from app.domain.schedules import TAIPEI; print(TAIPEI)"
+          docker run --rm --workdir /tmp heavy-parking-api:ci python -m app.ingestion.cli --help
 
   mobile:
     name: Mobile

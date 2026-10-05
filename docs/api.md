@@ -600,3 +600,12 @@ Stable auth codes: `UNAUTHENTICATED` => 401; `FORBIDDEN` => 403.
 
 ## OpenAPI
 FastAPI-generated OpenAPI is required and must match tests. Protected operations declare the bearer scheme. Breaking v1 contract changes require `/api/v2` rather than silent mutation.
+
+## M3 implementation notes
+
+See [the implementation contract and verification evidence](parking-api-implementation.md)
+for the 5000m radius validation limit, signing-key configuration, conservative
+rate normalization and component evidence projection. Compatibility adds
+`rule_evidence` to preserve all winning rules; the singular `provenance` is
+nullable when no single winner exists. Rates add `supporting_sources` and
+`applicability=MATCH|UNKNOWN` without omitting any common zone base member.

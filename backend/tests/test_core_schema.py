@@ -95,12 +95,25 @@ def evidence(db, tables):
 
 
 def test_all_tables_and_orm_mappings(schema_engine):
-    assert set(inspect(schema_engine).get_table_names()) - {"alembic_version", "spatial_ref_sys"} == TABLES
+    assert (
+        set(inspect(schema_engine).get_table_names(schema="public")) - {"alembic_version", "spatial_ref_sys"} == TABLES
+    )
     assert set(Base.metadata.tables) == TABLES
     configure_mappers()
 
 
-def test_migration_matches_orm_metadata(db):
+@pytest.mark.parametrize("extra_visible_schema", [False, True])
+def test_migration_matches_orm_metadata(db, extra_visible_schema):
+    if extra_visible_schema:
+        # PostGIS images expose Tiger/Topology schemas on search_path. Reproduce
+        # that shape even when a preceding downgrade removed those extensions.
+        db.execute(text("CREATE SCHEMA m1_extension_fixture"))
+        db.execute(text("CREATE TABLE m1_extension_fixture.extension_record (id INTEGER PRIMARY KEY)"))
+        db.execute(text("SET LOCAL search_path TO public, m1_extension_fixture"))
+        assert "extension_record" in inspect(db).get_table_names()
+    # Alembic's default reflection uses all visible schemas. Our models belong
+    # to public; extension-owned tables must never be proposed for removal.
+    db.execute(text("SET LOCAL search_path TO public"))
     context = MigrationContext.configure(
         db,
         opts={

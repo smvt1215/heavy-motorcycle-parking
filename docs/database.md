@@ -120,6 +120,8 @@ every table for Alembic. The migration declares its own schema and enum labels
 without importing the models, so later model changes cannot rewrite migration history.
 Downgrading to `001_bootstrap` removes M1 tables and native enum types while
 retaining PostGIS. Downgrading to `base` also removes the bootstrap extension.
+Alembic pins its transaction search path to `public`, including autogeneration,
+so visible Tiger/Topology extension tables are never treated as application tables.
 
 Identifiers are integer primary keys (`BIGINT` for raw records and realtime
 observations). Absolute timestamps use `TIMESTAMPTZ`; monetary amounts use

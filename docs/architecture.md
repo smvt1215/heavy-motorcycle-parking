@@ -32,6 +32,11 @@ Shared business logic; platform-adaptive iOS/Android presentation.
 ## Backend architecture
 Router -> Service/Domain -> Repository -> DB. Routers must not contain business rules or raw SQL.
 
+The M2 [compatibility engine](compatibility-engine.md) consumes preloaded domain
+facts through `ParkingCompatibilityService.evaluate`. It has no ORM/HTTP/UI
+dependency; repositories map normalized database evidence to explicit rule
+inputs, and holiday coverage is injected as a local calendar snapshot.
+
 ## GIS
 Store geospatial points as `GEOGRAPHY(POINT,4326)`. Nearby search uses `ST_DWithin` and GiST indexes. Never fetch all rows and calculate distance in Python.
 

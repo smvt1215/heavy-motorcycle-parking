@@ -151,8 +151,9 @@ Deleting a user removes vehicles and favorites but leaves report authorship NULL
 Deleting an individual zone referenced by a report is blocked; deleting its lot
 cascades both zones and reports.
 
-Schedules are optional JSONB on rules/rates and rate rules. Schedule validation
-and Asia/Taipei evaluation belong to subsequent domain-service milestones.
+Schedules are optional JSONB on rules/rates and rate rules. M2 defines the
+[rule schedule contract and Asia/Taipei evaluation](compatibility-engine.md);
+rate evaluation belongs to subsequent domain-service milestones.
 An unspecified rate vehicle never confirms a selected vehicle's price. Explicit
 source evidence covering all vehicles can be normalized into per-vehicle rates.
 Database integer storage does not replace strict upstream type validation:

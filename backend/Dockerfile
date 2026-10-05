@@ -1,5 +1,5 @@
 # Stage 1: Builder
-FROM python:3.12-slim as builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
@@ -9,8 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy pyproject.toml and install dependencies
+# Copy project metadata and the app package (setuptools needs app/ to exist) and install
 COPY pyproject.toml .
+COPY app ./app
 RUN pip install --no-cache-dir .
 
 # Stage 2: Runtime

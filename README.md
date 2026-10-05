@@ -43,10 +43,12 @@ A comprehensive parking application designed specifically for heavy motorcycles.
    ```bash
    pip install -e ".[dev]"
    ```
-4. Run database migrations:
+4. Run database migrations (uses `backend/alembic.ini`):
    ```bash
    alembic upgrade head
    ```
+   The backend reads the repository-root `.env` regardless of the working directory;
+   real environment variables take precedence over it.
 5. Start the development server:
    ```bash
    uvicorn app.main:app --reload
@@ -62,7 +64,8 @@ A comprehensive parking application designed specifically for heavy motorcycles.
    ```bash
    flutter pub get
    ```
-3. Run the app:
+3. Run the app on an Android emulator/device or iOS simulator/device
+   (`android/` and `ios/` platform projects are included; iOS builds require macOS + Xcode):
    ```bash
    flutter run
    ```

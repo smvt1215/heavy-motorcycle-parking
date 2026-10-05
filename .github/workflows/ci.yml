@@ -37,6 +37,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg://test:test@localhost:5432/test
       REDIS_URL: redis://localhost:6379/0
       ENVIRONMENT: DEV
+      HEALTH_REQUIRE_SERVICES: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -54,6 +55,20 @@ jobs:
       - name: Test
         working-directory: backend
         run: pytest tests/ -v
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: Build API image
+        run: docker build -t heavy-parking-api:ci backend
+      - name: Smoke-test API image
+        run: docker run --rm heavy-parking-api:ci python -c "import app.main"
 
   mobile:
     name: Mobile

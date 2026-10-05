@@ -14,7 +14,9 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, configure_mappers
 
 from app.config import settings
+from app.domain.parking import ParkingFacts, Provenance, RuleFact, ZoneFacts
 from app.models import Base, ParkingLot, ParkingZone
+from app.services import ParkingCompatibilityService
 from tests.fixtures.parking import (
     EVALUATION_AT,
     INVALID_REALTIME_CASES,
@@ -171,6 +173,78 @@ def test_rule_tiers_preserve_conflicts_nulls_and_provenance(db, tables, evidence
         assert row["effective_from"] == EVALUATION_AT
         assert row["schedule"]["timezone"] == "Asia/Taipei"
         assert row["source_record_id"]
+
+
+@pytest.mark.parametrize("vehicle", ["GREEN", "WHITE", "YELLOW", "RED", "CAR"])
+@pytest.mark.parametrize("uncertain_schedule", [False, True])
+def test_persisted_rule_fixture_preserves_unknown_in_domain_service(db, tables, evidence, vehicle, uncertain_schedule):
+    schedule = (
+        {"timezone": "UTC"}
+        if uncertain_schedule
+        else {
+            "timezone": "Asia/Taipei",
+            "weekdays": [0],
+            "start_time": "12:00",
+            "end_time": "13:00",
+        }
+    )
+    for index, case in enumerate(RULE_CASES):
+        fields = {key: value for key, value in case.items() if key != "scope"}
+        insert_id(
+            db,
+            tables["parking_rules"],
+            parking_id=evidence["lots"][0],
+            zone_id=evidence["zones"][0] if case["scope"] == "zone" else None,
+            source_id=evidence["sources"][index % 2],
+            fetched_at=EVALUATION_AT,
+            source_record_id=f"persisted-{index}",
+            effective_from=EVALUATION_AT,
+            effective_to=EVALUATION_AT + timedelta(hours=1),
+            schedule=schedule,
+            confidence=0.5,
+            **fields,
+        )
+    facts = []
+    for row in db.execute(select(tables["parking_rules"]).order_by(tables["parking_rules"].c.id)).mappings():
+        facts.append(
+            RuleFact(
+                rule_id=row["id"],
+                parking_id=row["parking_id"],
+                zone_id=row["zone_id"],
+                rule_kind=row["rule_kind"],
+                authority_priority=row["authority_priority"],
+                active=row["active"],
+                green_plate_allowed=row["green_plate_allowed"],
+                white_plate_allowed=row["white_plate_allowed"],
+                yellow_plate_allowed=row["yellow_plate_allowed"],
+                red_plate_allowed=row["red_plate_allowed"],
+                car_allowed=row["car_allowed"],
+                effective_from=row["effective_from"],
+                effective_to=row["effective_to"],
+                schedule=row["schedule"],
+                confidence=row["confidence"],
+                provenance=Provenance(
+                    source_id=row["source_id"], source_record_id=row["source_record_id"], fetched_at=row["fetched_at"]
+                ),
+            )
+        )
+    result = ParkingCompatibilityService().evaluate(
+        ParkingFacts(evidence["lots"][0], tuple(facts)),
+        ZoneFacts(evidence["zones"][0], evidence["lots"][0], "HEAVY_ONLY"),
+        vehicle,
+        EVALUATION_AT,
+    )
+    assert result.status == "UNKNOWN"
+    assert result.rule_ids == tuple(fact.rule_id for fact in facts[2:])
+    assert len(result.provenance) == 3
+    assert all(source.fetched_at == EVALUATION_AT for source in result.provenance)
+    assert result.confidence is None
+    expected_reason = (
+        "schedule_unknown"
+        if uncertain_schedule
+        else ("conflicting_permissions" if vehicle == "RED" else "unknown_permission")
+    )
+    assert result.reason == expected_reason
 
 
 def test_entrance_access_unknown_is_distinct_from_false(db, tables, evidence):

@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The documented `.env` lives at the repository root (see README). Resolve it explicitly so the
@@ -14,6 +15,15 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     environment: Literal["DEV", "STAGING", "PROD"] = "DEV"
     debug: bool = False
+    cursor_signing_key: SecretStr | None = None
+
+    @model_validator(mode="after")
+    def validate_cursor_key(self):
+        if self.cursor_signing_key is not None and len(self.cursor_signing_key.get_secret_value().encode()) < 32:
+            raise ValueError("CURSOR_SIGNING_KEY must contain at least 32 bytes")
+        if self.environment == "PROD" and self.cursor_signing_key is None:
+            raise ValueError("PROD requires a shared CURSOR_SIGNING_KEY")
+        return self
 
     model_config = SettingsConfigDict(env_file=REPO_ROOT_ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 

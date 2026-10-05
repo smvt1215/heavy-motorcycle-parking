@@ -40,6 +40,12 @@ inputs, and holiday coverage is injected as a local calendar snapshot.
 ## GIS
 Store geospatial points as `GEOGRAPHY(POINT,4326)`. Nearby search uses `ST_DWithin` and GiST indexes. Never fetch all rows and calculate distance in Python.
 
+M3 [parking API implementation](parking-api-implementation.md) batches indexed
+spatial candidates into domain snapshots, resolves selected-vehicle zone facts,
+and applies versioned ranking/keyset cursors. Request time pins compatibility
+and schedules; realtime freshness remains current. Common zone response models
+preserve independent compatibility, rate, realtime and entrance evidence.
+
 ## Caching
 Redis only for nearby/detail/realtime cache and rate limiting initially. TTL should reflect source freshness, normally 30–120 seconds for realtime-derived responses.
 

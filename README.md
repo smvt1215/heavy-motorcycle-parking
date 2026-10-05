@@ -54,6 +54,13 @@ A comprehensive parking application designed specifically for heavy motorcycles.
    uvicorn app.main:app --reload
    ```
 
+Parking discovery is available at `/api/v1/parking/nearby?lat=25.03&lng=121.56&vehicle=RED`.
+Detail, rates and realtime requests also require `vehicle`. See
+[M3 API implementation](docs/parking-api-implementation.md) for shared zone
+schemas, time-pinned queries, rate evaluation, cursor behavior and EXPLAIN evidence.
+Production API workers require the same `CURSOR_SIGNING_KEY` secret of at least
+32 bytes; development without one uses a process key that changes on restart.
+
 ### Mobile
 
 1. Navigate to the mobile directory:

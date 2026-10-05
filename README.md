@@ -75,6 +75,13 @@ A comprehensive parking application designed specifically for heavy motorcycles.
 - **Backend**: `cd backend && pytest`
 - **Mobile**: `cd mobile && flutter test`
 
+Backend migration/schema tests upgrade and downgrade the configured database.
+Use a disposable PostgreSQL/PostGIS test database, supplied through `DATABASE_URL`;
+do not point these tests at a database containing data you need to keep.
+Set `REDIS_URL` to a test Redis instance and `HEALTH_REQUIRE_SERVICES=1` to also
+verify live service health, as CI does. The schema tests include the M1 migration,
+foreign keys, tri-state permissions, realtime integrity, and ORM/schema comparison.
+
 ## Project Structure
 
 - `backend/`: FastAPI application

@@ -112,3 +112,55 @@ Lot-level availability summaries are derived API projections, not independent so
 
 ## Migrations
 Alembic only. Every schema PR tests upgrade and downgrade from the supported baseline.
+
+### M1 implementation
+Revision `002_core_schema` follows `001_bootstrap` and creates the 17 tables above.
+SQLAlchemy models live in `backend/app/models/`; importing `app.models` registers
+every table for Alembic. The migration declares its own schema and enum labels
+without importing the models, so later model changes cannot rewrite migration history.
+Downgrading to `001_bootstrap` removes M1 tables and native enum types while
+retaining PostGIS. Downgrading to `base` also removes the bootstrap extension.
+
+Identifiers are integer primary keys (`BIGINT` for raw records and realtime
+observations). Absolute timestamps use `TIMESTAMPTZ`; monetary amounts use
+`NUMERIC(10,2)`. Local rate time windows use `TIME` and allow overnight ranges.
+Time and duration ranges are half-open `[start, end)`. NULL/NULL local times mean
+no time restriction; equal endpoints and PostgreSQL's `24:00` are rejected.
+Use `00:00` as the next-day endpoint of an overnight window.
+`created_at` and `updated_at` default to database `now()`; ORM updates refresh
+`updated_at`, while future Core/bulk ingestion writers must update it explicitly.
+
+| Relation | Stored identity and integrity |
+| --- | --- |
+| Lots / zones | Optional lot `(source_id, external_id)` is unique; zones have a required parent lot and nullable nonnegative capacity. |
+| Rules / reports | Composite `(zone_id, parking_id)` foreign keys prohibit linking a zone from another lot; NULL `zone_id` means lot-wide. |
+| Rules | Five nullable permissions have no boolean defaults. `rule_kind` and `authority_priority` must be supplied explicitly. Equal-tier facts are not unique. |
+| Rates | Required `zone_id`, optional `vehicle_type` (NULL = unspecified applicability), parser status and raw text. Unclassified raw-only rates may have NULL type and monetary fields. `PARSED` requires a rate type; every other parser status requires raw text. |
+| Rate rules / evidence | Duration ranges, local time windows and day types belong to a rate; `parking_rate_sources` retains additional independent source evidence. |
+| Realtime | Zone-scoped observation history with source reference, nullable counts and fetch time; status/count consistency and count bounds are checked in PostgreSQL. |
+| Entrances | Separate nullable coordinates and nullable heavy-motorcycle access, with their own provenance. |
+| Raw evidence | JSONB payloads retain duplicate IDs and invalid values; composite `(batch_id, source_id)` prevents attributing a record to another source's batch. |
+| Users / vehicles / favorites | Unique authentication subject, saved vehicle type, and unique `(user_id, parking_id)` favorites; token validation remains an API responsibility. |
+| Reports / photos | Community evidence is separate from normalized facts; photos reference object-storage keys with unique keys and a required report. |
+
+Source references use `RESTRICT` on deletion; raw records also prevent deletion
+of their import batch. Lot/zone/rate child facts cascade with their parent.
+Deleting a user removes vehicles and favorites but leaves report authorship NULL.
+Deleting an individual zone referenced by a report is blocked; deleting its lot
+cascades both zones and reports.
+
+Schedules are optional JSONB on rules/rates and rate rules. Schedule validation
+and Asia/Taipei evaluation belong to subsequent domain-service milestones.
+An unspecified rate vehicle never confirms a selected vehicle's price. Explicit
+source evidence covering all vehicles can be normalized into per-vehicle rates.
+Database integer storage does not replace strict upstream type validation:
+PostgreSQL can cast numeric input before applying checks. Adapters/services must
+reject fractional counts and booleans before normalization and retain their raw
+payloads. No freshness flag, compatibility result, comparison price, or lot-level
+availability aggregate is persisted by M1.
+
+`backend/tests/fixtures/parking.py` provides reusable equal-authority conflicts,
+NULL permissions, mixed realtime observations, missing totals/fetch times, and
+invalid numeric/status inputs for later domain and API tests. Live PostGIS tests
+verify constraints, geospatial round trips, migration upgrade/downgrade and
+absence of model/migration drift.

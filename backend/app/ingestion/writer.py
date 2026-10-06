@@ -37,9 +37,12 @@ def point(lat: float, lng: float) -> WKTElement:
 
 
 def _older(snapshot: FeedSnapshot, source_updated_at: datetime | None, fetched_at: datetime | None) -> bool:
+    # A stored source timestamp later than this fetch is an upstream clock error,
+    # not ordering evidence; honoring it would freeze every later snapshot.
     return (fetched_at is not None and snapshot.fetched_at < fetched_at) or (
         snapshot.source_updated_at is not None
         and source_updated_at is not None
+        and source_updated_at <= snapshot.fetched_at
         and snapshot.source_updated_at < source_updated_at
     )
 
@@ -185,13 +188,21 @@ class ParkingIngestionWriter:
         )
         for rate in zone.rates:
             key = identity(external_id, "rate", f"{zone.key}:{rate.key}")
-            row = (
+            versions = (
                 await self.session.scalars(
                     select(ParkingRate).where(ParkingRate.source_id == source_id, ParkingRate.source_record_id == key)
                 )
-            ).one_or_none()
+            ).all()
+            row = next((version for version in versions if version.effective_to is None), None)
             if row is None:
-                row = ParkingRate(zone_id=entity.id, source_id=source_id, source_record_id=key)
+                # A retired interval stays closed; a reappearance is a new version
+                # starting now, so evaluation inside the gap never sees this rate.
+                row = ParkingRate(
+                    zone_id=entity.id,
+                    source_id=source_id,
+                    source_record_id=key,
+                    effective_from=snapshot.fetched_at if versions else None,
+                )
                 self.session.add(row)
             parsed = rate.parsed
             row.vehicle_type = rate.vehicle
@@ -199,7 +210,6 @@ class ParkingIngestionWriter:
             row.currency = "TWD"
             row.base_amount, row.unit_minutes = parsed.base_amount, parsed.unit_minutes
             row.free_minutes, row.daily_max_amount = parsed.free_minutes, parsed.daily_max_amount
-            row.effective_to = None
             row.source_updated_at, row.fetched_at = snapshot.source_updated_at, snapshot.fetched_at
             await self.session.flush()
             await self.session.execute(delete(ParkingRateRule).where(ParkingRateRule.rate_id == row.id))

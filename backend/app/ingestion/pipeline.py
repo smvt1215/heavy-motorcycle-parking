@@ -4,6 +4,7 @@ import base64
 import json
 import math
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -60,6 +61,13 @@ class ParkingIngestionPipeline:
             raise ValueError("Known feed and absolute fetched_at are required")
         if snapshot.source_updated_at is not None and snapshot.source_updated_at.utcoffset() is None:
             raise ValueError("source_updated_at must be an absolute instant")
+        warnings = {}
+        evidence = snapshot
+        if snapshot.source_updated_at is not None and snapshot.source_updated_at > snapshot.fetched_at:
+            # Raw evidence keeps the upstream value, but a future source clock is
+            # never used for monotonic ordering or freshness of normalized facts.
+            snapshot = replace(snapshot, source_updated_at=None)
+            warnings["FUTURE_SOURCE_UPDATED_AT"] = 1
         envelope_error = None
         try:
             records = self.adapter.records(snapshot.payload)
@@ -73,7 +81,7 @@ class ParkingIngestionPipeline:
                 source_id=sources[snapshot.kind],
                 feed_kind=snapshot.kind,
                 raw_payload=_stored_payload(snapshot.payload),
-                source_updated_at=snapshot.source_updated_at,
+                source_updated_at=evidence.source_updated_at,
                 fetched_at=snapshot.fetched_at,
                 started_at=datetime.now(UTC),
                 status=ImportBatchStatus.RUNNING,
@@ -95,7 +103,7 @@ class ParkingIngestionPipeline:
                     raw_rate_text=_safe_text(record.get("payex"))
                     if isinstance(record, dict) and isinstance(record.get("payex"), str)
                     else None,
-                    source_updated_at=snapshot.source_updated_at,
+                    source_updated_at=evidence.source_updated_at,
                     fetched_at=snapshot.fetched_at,
                     status=RawRecordStatus.PENDING,
                 )
@@ -104,7 +112,7 @@ class ParkingIngestionPipeline:
                 raw_ids.append(raw.id)
 
         if envelope_error is not None:
-            return await self._finish(batch_id, 0, 0, {envelope_error.code: 1}, force_failed=True)
+            return await self._finish(batch_id, 0, 0, {envelope_error.code: 1}, force_failed=True, warnings=warnings)
         normalized, failed, errors = 0, 0, Counter()
         conflicts = _conflicting_ids(records)
         seen = set()
@@ -178,9 +186,11 @@ class ParkingIngestionPipeline:
                 for row in rows:
                     row.status, row.error_code = RawRecordStatus.INVALID, "BATCH_ABORTED"
                     row.error_message = "Normalized transaction rolled back; raw evidence retained"
-            await self._finish(batch_id, 0, len(records), {"BATCH_ABORTED": len(records)}, force_failed=True)
+            await self._finish(
+                batch_id, 0, len(records), {"BATCH_ABORTED": len(records)}, force_failed=True, warnings=warnings
+            )
             raise
-        result = await self._finish(batch_id, normalized, failed, dict(errors))
+        result = await self._finish(batch_id, normalized, failed, dict(errors), warnings=warnings)
         if self.cache is not None:
             try:
                 await self.cache.set(
@@ -202,7 +212,7 @@ class ParkingIngestionPipeline:
                     batch.error_summary = {**(batch.error_summary or {}), "cache": "UNAVAILABLE"}
         return result
 
-    async def _finish(self, batch_id, normalized, failed, errors, *, force_failed=False) -> ImportResult:
+    async def _finish(self, batch_id, normalized, failed, errors, *, force_failed=False, warnings=None) -> ImportResult:
         status = (
             ImportBatchStatus.FAILED
             if force_failed or (failed and not normalized)
@@ -214,7 +224,8 @@ class ParkingIngestionPipeline:
             batch = await self.session.get(RawImportBatch, batch_id)
             batch.status, batch.finished_at = status, datetime.now(UTC)
             batch.normalized_records, batch.failed_records = normalized, failed
-            batch.error_summary = {"errors": errors} if errors else None
+            summary = {**({"errors": errors} if errors else {}), **({"warnings": warnings} if warnings else {})}
+            batch.error_summary = summary or None
             total = batch.total_records
         return ImportResult(batch_id, status, total, normalized, failed)
 

@@ -545,20 +545,71 @@ async def test_frozen_source_data_never_becomes_fresh_from_repeated_downloads(li
         assert not is_available_only("ALLOWED", availability)
 
 
-async def test_rate_changes_expire_and_reactivate_stable_rate_identity(live):
+async def test_rate_reappearance_keeps_retired_interval_and_opens_new_version(live):
     session, pipeline = live
     await pipeline.ingest(snapshot())
     async with session.begin():
         original = (await session.scalars(select(ParkingRate).where(ParkingRate.vehicle_type == "YELLOW"))).one()
-        original_id = original.id
+        original_id, key = original.id, original.source_record_id
     changed = row()
     changed["FareInfo"]["FareRule"][0]["ParkingRates"] = 40
-    await pipeline.ingest(snapshot([changed], fetched_at=NOW + timedelta(seconds=10)))
+    retired_at, back_at = NOW + timedelta(seconds=10), NOW + timedelta(seconds=20)
+    await pipeline.ingest(snapshot([changed], fetched_at=retired_at))
     async with session.begin():
-        assert (await session.get(ParkingRate, original_id)).effective_to is not None
-    await pipeline.ingest(snapshot(fetched_at=NOW + timedelta(seconds=20)))
+        assert (await session.get(ParkingRate, original_id)).effective_to == retired_at
+    await pipeline.ingest(snapshot(fetched_at=back_at))
+    await pipeline.ingest(snapshot(fetched_at=back_at + timedelta(seconds=10)))
     async with session.begin():
-        assert (await session.get(ParkingRate, original_id)).effective_to is None
+        versions = (
+            await session.scalars(
+                select(ParkingRate).where(ParkingRate.source_record_id == key).order_by(ParkingRate.id)
+            )
+        ).all()
+        assert [(v.id == original_id, v.effective_from, v.effective_to) for v in versions] == [
+            (True, None, retired_at),
+            (False, back_at, None),
+        ]
+        reopened = versions[1]
+        assert (await session.scalar(select(func.count()).where(ParkingRateSource.rate_id == reopened.id))) == 1
+        lot_id = (await session.scalars(select(ParkingLot.id))).one()
+        repository = ParkingRepository(session)
+        for at, expected in ((retired_at + timedelta(seconds=5), set()), (back_at, {reopened.id})):
+            lot = await repository.detail(lot_id)
+            live_ids = {rate["rate_id"] for zone in lot.zones for rate in resolve_rates(zone.rates, "YELLOW", at)[1]}
+            assert live_ids & {v.id for v in versions} == expected
+
+
+async def test_future_source_timestamp_cannot_block_later_snapshots(live):
+    session, pipeline = live
+    far_future = "Tue Oct 06 00:02:00 CST 2099"
+    result = await pipeline.ingest(snapshot(stamp=far_future))
+    async with session.begin():
+        batch = await session.get(RawImportBatch, result.batch_id)
+        assert batch.source_updated_at is not None and batch.source_updated_at.year == 2099
+        assert batch.raw_payload["data"]["UPDATETIME"] == far_future
+        assert batch.error_summary == {"warnings": {"FUTURE_SOURCE_UPDATED_AT": 1}}
+        lot = (await session.scalars(select(ParkingLot))).one()
+        assert lot.source_updated_at is None
+    later = NOW + timedelta(minutes=5)
+    result = await pipeline.ingest(snapshot(fetched_at=later, stamp="Tue Oct 06 00:06:00 CST 2026"))
+    assert result.failed == 0 and result.normalized == 1
+    realtime = await pipeline.ingest(
+        snapshot([{"id": "M4-TEST", "availableheavymotor": 2}], kind="realtime", fetched_at=later)
+    )
+    assert realtime.failed == 0
+    async with session.begin():
+        lot = (await session.scalars(select(ParkingLot))).one()
+        assert lot.fetched_at == later and lot.source_updated_at.year == 2026
+
+
+async def test_previously_stored_future_timestamp_is_not_ordering_evidence(live):
+    session, pipeline = live
+    await pipeline.ingest(snapshot())
+    async with session.begin():
+        lot = (await session.scalars(select(ParkingLot))).one()
+        lot.source_updated_at = datetime(2099, 1, 1, tzinfo=UTC)
+    result = await pipeline.ingest(snapshot(fetched_at=NOW + timedelta(minutes=5)))
+    assert result.failed == 0 and result.normalized == 1
 
 
 async def test_data_error_is_a_record_failure_not_a_batch_abort(live):

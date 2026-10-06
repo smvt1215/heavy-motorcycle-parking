@@ -72,13 +72,23 @@ class ParkingZone(TimestampMixin, Base):
         ),
         # Target for composite (zone_id, parking_id) FKs that keep zone-scoped rows in the same lot.
         UniqueConstraint("id", "parking_id", name="uq_parking_zones_id_parking_id"),
+        ForeignKeyConstraint(
+            ["source_id"], ["data_sources.id"], name="fk_parking_zones_source_id_data_sources", ondelete="RESTRICT"
+        ),
+        UniqueConstraint("source_id", "external_id", name="uq_parking_zones_source_id_external_id"),
+        CheckConstraint(
+            "external_id IS NULL OR source_id IS NOT NULL", name="ck_parking_zones_external_id_requires_source"
+        ),
         CheckConstraint("capacity IS NULL OR capacity >= 0", name="ck_parking_zones_capacity_nonnegative"),
         Index("ix_parking_zones_parking_id", "parking_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     parking_id: Mapped[int] = mapped_column(Integer)
+    source_id: Mapped[int | None] = mapped_column(Integer)
+    external_id: Mapped[str | None] = mapped_column(String(255))
     name: Mapped[str | None] = mapped_column(String(200))
+    source_active: Mapped[bool | None] = mapped_column(Boolean)
     space_type: Mapped[ParkingSpaceType] = mapped_column(parking_space_type_enum)
     capacity: Mapped[int | None] = mapped_column(Integer)
 

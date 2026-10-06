@@ -53,6 +53,7 @@ class RealtimeFact:
     total: int | None
     provenance: Provenance
     freshness_seconds: int = 120
+    freshness_uses_source_timestamp: bool = False
 
 
 @dataclass(frozen=True)

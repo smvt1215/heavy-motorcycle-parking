@@ -100,11 +100,19 @@ def resolve_availability(fact: RealtimeFact | None, now: datetime) -> dict[str, 
     available, total = fact.available, fact.total
     if status is None or not validate_counts(status, available, total):
         status, available, total = UNKNOWN, None, None
+    origin = fact.provenance.fetched_at
+    if fact.freshness_uses_source_timestamp:
+        updated = fact.provenance.source_updated_at
+        origin = (
+            min(origin, updated)
+            if origin is not None and origin <= current and updated is not None and updated <= current
+            else None
+        )
     return {
         "status": status,
         "available": available,
         "total": total,
-        "freshness": {"status": freshness_status(fact.provenance.fetched_at, fact.freshness_seconds, current)},
+        "freshness": {"status": freshness_status(origin, fact.freshness_seconds, current)},
         "provenance": _provenance_dict(fact.provenance),
     }
 

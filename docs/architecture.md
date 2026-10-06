@@ -47,6 +47,12 @@ and schedules; realtime freshness remains current. Common zone response models
 preserve independent compatibility, rate, realtime and entrance evidence.
 
 ## Caching
+
+M4's [Taipei ingestion worker](taipei-ingestion.md) lives in `app/ingestion`:
+HTTPX downloader -> independently committed raw evidence -> pure city adapter
+-> source-owned PostgreSQL writer with per-record SAVEPOINTs. A shared transaction
+advisory lock coordinates both Taipei feeds; Redis holds import-status metadata.
+This worker runs outside API routers and does not change domain precedence.
 Redis only for nearby/detail/realtime cache and rate limiting initially. TTL should reflect source freshness, normally 30–120 seconds for realtime-derived responses.
 
 ## Privacy/security

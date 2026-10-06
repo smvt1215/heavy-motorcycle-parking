@@ -1,0 +1,13 @@
+{
+  "data": {
+    "UPDATETIME": "Tue Oct 06 00:02:00 CST 2026",
+    "park": [
+      {"id": "TPE0003", "availablecar": 15, "availablemotor": -9, "availableheavymotor": 2},
+      {"id": "TPE9001", "availablecar": "0", "availablemotor": "12", "availableheavymotor": -9, "availablebus": 3},
+      {"id": "TPE9002", "availablecar": "-9"},
+      {"id": "TPE9007", "availablecar": 1.5},
+      {"id": "TPE9008", "availablemotor": true},
+      {"id": "TPE9009", "availableheavymotor": -1}
+    ]
+  }
+}

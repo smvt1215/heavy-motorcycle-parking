@@ -95,13 +95,18 @@ foreign keys, tri-state permissions, realtime integrity, and ORM/schema comparis
 - `mobile/`: Flutter mobile application
 - `database/`: Database initialization scripts and migrations
 - `infra/`: Infrastructure configuration and deployment scripts (placeholder)
-- `workers/`: Data pipeline workers (placeholder)
+- `workers/`: Data pipeline worker operations; M4 implementation in `backend/app/ingestion`
 - `docs/`: Architecture Decision Records (ADRs) and documentation
 - `scripts/`: Utility scripts
 
 ## Documentation
 
 See the [docs/](docs/) directory for detailed architecture decisions.
+
+To import Taipei parking data after backend migrations, run
+`python -m app.ingestion.cli --feed all` from `backend/`.
+See [Taipei ingestion](docs/taipei-ingestion.md) for source mappings, strict
+unknown-data handling, file replay and observable record failures.
 
 ## License
 

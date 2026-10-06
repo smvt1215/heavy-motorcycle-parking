@@ -53,6 +53,10 @@ class RawImportBatch(TimestampMixin, Base):
     normalized_records: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     failed_records: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     error_summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    feed_kind: Mapped[str | None] = mapped_column(String(32))
+    raw_payload: Mapped[Any | None] = mapped_column(JSONB)
+    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RawParkingRecord(CreatedAtMixin, Base):

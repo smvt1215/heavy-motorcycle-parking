@@ -167,3 +167,23 @@ NULL permissions, mixed realtime observations, missing totals/fetch times, and
 invalid numeric/status inputs for later domain and API tests. Live PostGIS tests
 verify constraints, geospatial round trips, migration upgrade/downgrade and
 absence of model/migration drift.
+
+### M4 ingestion identity and raw envelopes
+
+Revision `003_ingestion_identity` adds nullable zone `(source_id, external_id)`
+identity with a unique constraint, a restricted source FK, and the same
+external-ID-requires-source check as lots. Existing/manual zones remain valid
+with both columns NULL. This lets source upserts preserve zone IDs without
+deduplicating unrelated providers or legality rules by display name.
+Nullable `source_active` marks source-owned zone tombstones without converting
+absence to a NOT_ALLOWED legality fact or affecting manual zones.
+
+`data_sources.freshness_uses_source_timestamp` defaults to false for existing
+sources. Taipei realtime sets it true: freshness requires valid fetch/update
+instants and uses the older instant, preserving actual fetched_at provenance
+while preventing frozen upstream data from appearing fresh after polling.
+
+Import batches add nullable `feed_kind`, JSONB `raw_payload`, `source_updated_at`
+and `fetched_at`. Complete source envelopes and malformed-JSON byte evidence are
+retained independently of normalized transactions. No new tables or enum labels
+are added; downgrading restores the M1 schema while retaining existing rows.

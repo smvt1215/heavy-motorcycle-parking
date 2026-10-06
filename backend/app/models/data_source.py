@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -24,3 +24,4 @@ class DataSource(TimestampMixin, Base):
     attribution: Mapped[str | None] = mapped_column(Text)
     # Realtime freshness threshold for this source; NULL means use service default.
     freshness_seconds: Mapped[int | None] = mapped_column(Integer)
+    freshness_uses_source_timestamp: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))

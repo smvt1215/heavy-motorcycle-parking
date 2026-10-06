@@ -64,6 +64,12 @@ Scheduled parking rules/rates are evaluated at one explicit absolute instant, `e
 
 Realtime **freshness** remains current-observation freshness and is not rewound by `evaluation_at`. The pinned instant controls compatibility/scheduled-rule context attached to the realtime response; freshness is still evaluated against current server/source policy.
 
+M4 Taipei realtime enables source-timestamp freshness policy. Its freshness age
+uses the earlier of actual `fetched_at` and `source_updated_at`; missing or future
+required timestamps yield UNKNOWN freshness. Re-fetching frozen upstream data
+does not make it FRESH. This source policy changes input facts, not v1 ranking
+formulas or cursor sort keys; other sources retain their configured fetch policy.
+
 ## Provenance
 Rule/compatibility, rate, realtime, and entrance facts may come from different datasets and MUST retain separate provenance.
 

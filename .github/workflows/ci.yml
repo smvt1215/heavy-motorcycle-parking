@@ -79,6 +79,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.6'
           channel: stable
           cache: true
       - name: Install dependencies
@@ -90,3 +91,23 @@ jobs:
       - name: Test
         working-directory: mobile
         run: flutter test
+      - name: Build Android debug app
+        working-directory: mobile
+        run: flutter build apk --debug
+
+  mobile-ios:
+    name: Mobile iOS build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - name: Install dependencies
+        working-directory: mobile
+        run: flutter pub get
+      - name: Build iOS simulator app
+        working-directory: mobile
+        run: flutter build ios --simulator --no-codesign

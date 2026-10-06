@@ -5,7 +5,7 @@ version: 0.1.0+1
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
-  flutter: '>=3.24.0'
+  flutter: '>=3.47.0'
 
 dependencies:
   flutter:
@@ -17,6 +17,8 @@ dependencies:
   freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
   google_maps_flutter: ^2.10.0
+  geolocator: ^14.0.2
+  url_launcher: ^6.3.2
   cupertino_icons: ^1.0.8
 
 dev_dependencies:
@@ -30,4 +32,6 @@ dev_dependencies:
   mockito: ^5.4.4
 
 flutter:
+  config:
+    enable-swift-package-manager: false
   uses-material-design: true

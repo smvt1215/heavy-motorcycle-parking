@@ -12,6 +12,11 @@ M4 implements the [Taipei V2 mapping and worker](taipei-ingestion.md), including
 verified endpoints, independent static/realtime sources, attribution, strict
 category evidence, replay commands and record-level failure inspection.
 
+Google Places API (New) is a destination geocoding source only (M6, see
+[destination search](destination-search.md)). It is called by the backend, never
+stored in parking tables, and never used for legality, rates or availability.
+Device-local recent searches cache Google coordinates for at most 30 days.
+
 ## Adapter contract
 Create `BaseParkingAdapter`, then `TaipeiParkingAdapter` and `NewTaipeiParkingAdapter`. City-specific parsing stays outside core domain logic.
 

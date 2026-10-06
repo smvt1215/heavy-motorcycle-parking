@@ -121,4 +121,6 @@ Google/Apple Maps app dispatch, VoiceOver/TalkBack and platform appearance. Chec
 on both platforms: deny location and keep searching; drag without API requests;
 press `搜尋此區域`; change YELLOW/RED and filters; open mixed-zone detail; check
 stale/partial/unknown wording; confirm navigation prefers the allowed entrance;
-switch system light/dark appearance. Destination search is M6, outside M5.
+switch system light/dark appearance. M6 adds [destination search](destination-search.md);
+destination camera moves within ~1 m of the searched center do not prompt
+`搜尋此區域`.

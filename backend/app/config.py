@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The documented `.env` lives at the repository root (see README). Resolve it explicitly so the
@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     environment: Literal["DEV", "STAGING", "PROD"] = "DEV"
     debug: bool = False
     cursor_signing_key: SecretStr | None = None
+    # Server-side Places API (New) key. Unset disables destination search with PLACES_UNAVAILABLE.
+    google_places_api_key: SecretStr | None = None
+    places_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    places_rate_limit_per_minute: int = Field(default=60, ge=1, le=10_000)
+
+    @field_validator("google_places_api_key", mode="before")
+    @classmethod
+    def blank_places_key_is_unset(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
 
     @model_validator(mode="after")
     def validate_cursor_key(self):

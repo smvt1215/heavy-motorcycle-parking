@@ -1,19 +1,33 @@
 import secrets
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.cache import get_redis
 from app.config import settings
 from app.domain.errors import DiscoveryError
 from app.routers.health import router as health_router
 from app.routers.parking import router as parking_router
+from app.routers.places import router as places_router
 from app.services.cursors import CursorCodec
+from app.services.places import GooglePlacesClient
+from app.services.rate_limit import RedisRateLimiter
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    if app.state.places_http is not None:
+        await app.state.places_http.aclose()
 
 
 def create_app() -> FastAPI:
     app = FastAPI(
+        lifespan=lifespan,
         title="Heavy Motorcycle Parking API",
         description="重機停車通 API",
         version=settings.app_version,
@@ -26,6 +40,16 @@ def create_app() -> FastAPI:
     )
     app.state.holiday_calendar = None
     app.state.clock = lambda: datetime.now(UTC)
+    places_key = settings.google_places_api_key
+    app.state.places_http = (
+        httpx.AsyncClient(timeout=settings.places_timeout_seconds, follow_redirects=False) if places_key else None
+    )
+    app.state.places_gateway = (
+        GooglePlacesClient(places_key.get_secret_value(), app.state.places_http) if places_key else None
+    )
+    app.state.places_rate_limiter = RedisRateLimiter(
+        get_redis, settings.places_rate_limit_per_minute, prefix="ratelimit"
+    )
 
     @app.middleware("http")
     async def capture_request_time(request: Request, call_next):
@@ -55,6 +79,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(parking_router, prefix="/api/v1")
+    app.include_router(places_router, prefix="/api/v1")
     return app
 
 

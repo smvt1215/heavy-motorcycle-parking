@@ -3,7 +3,7 @@
 ## Stack
 - Mobile: Flutter stable, Dart, Riverpod, go_router, Dio, Freezed/json_serializable
 - Map: Google Maps SDK
-- Search: Google Places API (New)
+- Search: Google Places API (New), proxied by the backend (`/api/v1/places`)
 - Navigation MVP: Apple Maps / Google Maps deep link
 - Backend: Python, FastAPI, Pydantic, SQLAlchemy 2, Alembic
 - DB: PostgreSQL 18 + PostGIS 3.6+
@@ -35,6 +35,10 @@ only by explicit area search; pinned queries and request generations preserve
 selected-vehicle and pagination context. The map and zone panel render separate
 rule/rate/realtime/entrance facts and use foreground-only location plus external
 navigation.
+
+M6 [destination search](destination-search.md) resolves an address/POI through
+our backend Places proxy, then reuses the normal nearby search at the destination.
+The Places key stays on the server; the app only talks to `/api/v1`.
 
 ## Backend architecture
 Router -> Service/Domain -> Repository -> DB. Routers must not contain business rules or raw SQL.

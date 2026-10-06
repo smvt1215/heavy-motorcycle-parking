@@ -1,23 +1,13 @@
-import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/constants.dart';
+import '../../data/api_client.dart';
 import '../../data/parking_repository.dart';
 import '../../domain/parking.dart';
+import '../../domain/place.dart';
 
-const Duration apiTimeout = Duration(seconds: 15);
-
-final parkingRepositoryProvider = Provider<ParkingRepository>((ref) {
-  final dio = Dio(
-    BaseOptions(
-      baseUrl: AppConstants.apiBaseUrl,
-      connectTimeout: apiTimeout,
-      receiveTimeout: apiTimeout,
-    ),
-  );
-  ref.onDispose(dio.close);
-  return DioParkingRepository(dio);
-});
+final parkingRepositoryProvider = Provider<ParkingRepository>(
+  (ref) => DioParkingRepository(ref.watch(apiDioProvider)),
+);
 
 /// Persistent (not autoDispose) so vehicle and filters survive rebuilds and
 /// navigation away from the map.
@@ -26,6 +16,14 @@ final mapControllerProvider = StateNotifierProvider<MapController, MapState>(
 );
 
 const GeoPoint defaultMapCenter = GeoPoint(25.033, 121.5654);
+
+/// Camera targets round-trip through native map SDKs as floats; differences
+/// under ~1 m are not a user move and must not prompt `搜尋此區域`.
+const double cameraMoveEpsilonDegrees = 0.00001;
+
+bool _sameCenter(GeoPoint a, GeoPoint b) =>
+    (a.lat - b.lat).abs() < cameraMoveEpsilonDegrees &&
+    (a.lng - b.lng).abs() < cameraMoveEpsilonDegrees;
 
 const Object _unset = Object();
 
@@ -46,6 +44,7 @@ class MapState {
     this.hasMore = false,
     this.sortVersion,
     this.hasSearched = false,
+    this.destination,
   });
 
   /// Committed query; its center is the last searched center.
@@ -71,6 +70,10 @@ class MapState {
   final int? sortVersion;
   final bool hasSearched;
 
+  /// Destination chosen through Places search. Only its coordinates feed the
+  /// nearby query; it carries no parking facts.
+  final PlaceDestination? destination;
+
   MapState copyWith({
     ParkingQuery? query,
     List<ParkingLot>? items,
@@ -87,6 +90,7 @@ class MapState {
     bool? hasMore,
     Object? sortVersion = _unset,
     bool? hasSearched,
+    Object? destination = _unset,
   }) =>
       MapState(
         query: query ?? this.query,
@@ -117,6 +121,9 @@ class MapState {
             ? this.sortVersion
             : sortVersion as int?,
         hasSearched: hasSearched ?? this.hasSearched,
+        destination: identical(destination, _unset)
+            ? this.destination
+            : destination as PlaceDestination?,
       );
 }
 
@@ -158,10 +165,28 @@ class MapController extends StateNotifier<MapState> {
   void cameraIdle() {
     final center = _cameraCenter;
     if (center == null) return;
-    final moved = center != state.query.center;
+    final moved = !_sameCenter(center, state.query.center);
     if (moved != state.needsAreaSearch) {
       state = state.copyWith(needsAreaSearch: moved);
     }
+  }
+
+  /// Moves the search to a Places destination and queries our own backend.
+  Future<void> searchDestination(PlaceDestination destination) {
+    if (!destination.location.isValid) {
+      throw ArgumentError.value(destination.location, 'destination');
+    }
+    _cameraCenter = destination.location;
+    state = state.copyWith(destination: destination);
+    return _runSearch(
+      state.query.copyWith(center: destination.location),
+      clearAreaPrompt: true,
+    );
+  }
+
+  /// Removes the destination marker; results stay at the searched center.
+  void clearDestination() {
+    if (state.destination != null) state = state.copyWith(destination: null);
   }
 
   Future<void> setVehicle(VehicleType vehicle) async {

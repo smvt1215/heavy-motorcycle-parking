@@ -7,6 +7,7 @@ import 'package:heavy_parking/domain/parking.dart';
 import 'package:heavy_parking/features/map/map_controller.dart';
 
 import '../fixtures/parking.dart';
+import '../fixtures/places.dart';
 
 class _NearbyCall {
   _NearbyCall(this.query, this.cursor);
@@ -115,6 +116,54 @@ void main() {
     );
     expect(state().evaluationAt, DateTime.utc(2026, 10, 2, 9, 30));
     expect(state().sortVersion, 1);
+  });
+
+  test('destination search queries our backend at the destination', () async {
+    final filtered = controller.setFilters(
+      state().query.copyWith(vehicle: VehicleType.yellow, radius: 800),
+    );
+    repo.nearbyCalls.single.completer.complete(_page(vehicle: 'YELLOW'));
+    await filtered;
+    controller.cameraMoved(const GeoPoint(25.1, 121.6));
+    controller.cameraIdle();
+    expect(state().needsAreaSearch, isTrue);
+
+    final future = controller.searchDestination(taipei101);
+    expect(state().destination, same(taipei101));
+    expect(state().needsAreaSearch, isFalse);
+    final call = repo.nearbyCalls.last;
+    expect(call.cursor, isNull);
+    expect(call.query.center, taipei101.location);
+    // Destination search keeps the explicit vehicle and filters.
+    expect(call.query.vehicle, VehicleType.yellow);
+    expect(call.query.radius, 800);
+    call.completer.complete(_page(vehicle: 'YELLOW'));
+    await future;
+    expect(state().items, isNotEmpty);
+
+    // The camera animating onto the destination is not a user move.
+    controller.cameraMoved(
+      GeoPoint(taipei101.location.lat + 0.000001, taipei101.location.lng),
+    );
+    controller.cameraIdle();
+    expect(state().needsAreaSearch, isFalse);
+
+    controller.clearDestination();
+    expect(state().destination, isNull);
+    expect(state().query.center, taipei101.location);
+  });
+
+  test('a later area search keeps the destination marker', () async {
+    final first = controller.searchDestination(taipei101);
+    repo.nearbyCalls.last.completer.complete(_page());
+    await first;
+    controller.cameraMoved(const GeoPoint(25.05, 121.57));
+    controller.cameraIdle();
+    final second = controller.search();
+    repo.nearbyCalls.last.completer.complete(_page());
+    await second;
+    expect(state().query.center, const GeoPoint(25.05, 121.57));
+    expect(state().destination, same(taipei101));
   });
 
   test('camera frames and idle never call the API', () async {

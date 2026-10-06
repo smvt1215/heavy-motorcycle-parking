@@ -9,6 +9,8 @@ Base path: `/api/v1`.
 - `GET /parking/{id}`
 - `GET /parking/{id}/rates`
 - `GET /parking/{id}/realtime`
+- `GET /places/autocomplete`
+- `GET /places/{place_id}`
 - `GET /parking/{id}/reports`
 - `POST /reports`
 - `GET /favorites`
@@ -589,6 +591,43 @@ The response uses the same common zone base. `evaluation_at` controls attached c
 ```
 
 A FRESH realtime example/fact MUST include non-null `fetched_at` provenance.
+
+## Destination search
+
+Google Places is a geocoding source only. These public endpoints never return or
+influence parking compatibility, rates, availability or ranking; clients pass the
+resolved coordinates to `GET /parking/nearby`.
+
+`GET /places/autocomplete?input=<1..100 chars>&session_token=<UUID>[&lat=&lng=]`
+
+```json
+{
+  "suggestions": [
+    {"place_id": "ChIJH56c2rarQjQRphD9gvC8BhI", "primary_text": "台北101", "secondary_text": "台灣台北市信義區信義路五段7號"}
+  ],
+  "attribution": "GOOGLE"
+}
+```
+
+`GET /places/{place_id}?session_token=<UUID>`
+
+```json
+{
+  "place_id": "ChIJH56c2rarQjQRphD9gvC8BhI",
+  "name": "台北101",
+  "address": "110台灣台北市信義區信義路五段7號",
+  "location": {"lat": 25.0339639, "lng": 121.5644722},
+  "attribution": "GOOGLE"
+}
+```
+
+- `lat`/`lng` are an optional location bias and must be supplied together.
+- Clients reuse one `session_token` for all autocomplete requests and the final
+  details request of a selection, then start a new token.
+- Errors: `422 VALIDATION_ERROR`, `404 PLACE_NOT_FOUND`, `429 RATE_LIMITED`,
+  `502 PLACES_UPSTREAM_ERROR`, `503 PLACES_UNAVAILABLE` (no server key).
+
+See [destination search](destination-search.md).
 
 ## Error envelope
 Use one JSON error shape with stable machine-readable code, human-readable message, and optional details/field errors.

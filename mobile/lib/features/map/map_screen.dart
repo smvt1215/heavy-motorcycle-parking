@@ -7,6 +7,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../data/location_service.dart';
 import '../../data/map_configuration.dart';
 import '../../domain/parking.dart';
+import '../../domain/place.dart';
+import '../search/destination_search_screen.dart';
 import 'filters_sheet.dart';
 import 'map_controller.dart';
 import 'map_styles.dart';
@@ -28,6 +30,7 @@ class MapCanvasConfiguration {
     required this.onCameraMove,
     required this.onCameraIdle,
     required this.onSelect,
+    this.destination,
   });
   final GeoPoint center;
   final List<ParkingLot> items;
@@ -36,6 +39,9 @@ class MapCanvasConfiguration {
   final ValueChanged<GeoPoint> onCameraMove;
   final VoidCallback onCameraIdle;
   final ValueChanged<ParkingLot> onSelect;
+
+  /// Places destination marker; it is not a parking result.
+  final PlaceDestination? destination;
 }
 
 class MapScreen extends ConsumerStatefulWidget {
@@ -101,6 +107,31 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
   }
 
+  Future<void> _searchDestination() async {
+    final destination = await Navigator.of(context).push<PlaceDestination>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const DestinationSearchScreen(),
+      ),
+    );
+    if (destination == null || !mounted) return;
+    await ref
+        .read(mapControllerProvider.notifier)
+        .searchDestination(destination);
+  }
+
+  void _moveCamera(PlaceDestination? previous, PlaceDestination? next) {
+    if (next == null || identical(previous, next)) return;
+    unawaited(
+      _map?.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(next.location.lat, next.location.lng),
+          16,
+        ),
+      ),
+    );
+  }
+
   void _message(String message) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(message)));
 
@@ -118,6 +149,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<PlaceDestination?>(
+      mapControllerProvider.select((state) => state.destination),
+      _moveCamera,
+    );
     final state = ref.watch(mapControllerProvider);
     final controller = ref.read(mapControllerProvider.notifier);
     final dark = Theme.of(context).brightness == Brightness.dark;
@@ -129,6 +164,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       onCameraMove: controller.cameraMoved,
       onCameraIdle: controller.cameraIdle,
       onSelect: controller.selectLot,
+      destination: state.destination,
     );
     return Scaffold(
       body: Stack(
@@ -186,6 +222,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                         ],
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  _DestinationBar(
+                    destination: state.destination,
+                    onSearch: _searchDestination,
+                    onClear: controller.clearDestination,
                   ),
                   const SizedBox(height: 8),
                   SingleChildScrollView(
@@ -290,7 +332,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       mapToolbarEnabled: false,
       padding: EdgeInsets.only(
         bottom: MediaQuery.sizeOf(context).height * 0.28,
-        top: 160,
+        top: 220,
       ),
       onMapCreated: (map) => _map = map,
       onCameraMove: (position) => config.onCameraMove(
@@ -306,6 +348,20 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         ),
       },
       markers: {
+        if (config.destination case final destination?)
+          Marker(
+            markerId: const MarkerId('destination'),
+            position:
+                LatLng(destination.location.lat, destination.location.lng),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueAzure,
+            ),
+            zIndexInt: 1,
+            infoWindow: InfoWindow(
+              title: destination.name,
+              snippet: '搜尋目的地（非停車位置）',
+            ),
+          ),
         if (_icons != null)
           for (final lot in config.items)
             Marker(
@@ -319,6 +375,74 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               onTap: () => config.onSelect(lot),
             ),
       },
+    );
+  }
+}
+
+class _DestinationBar extends StatelessWidget {
+  const _DestinationBar({
+    required this.destination,
+    required this.onSearch,
+    required this.onClear,
+  });
+  final PlaceDestination? destination;
+  final VoidCallback onSearch;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final selected = destination;
+    return Material(
+      elevation: 2,
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(24),
+      child: Row(
+        children: [
+          Expanded(
+            child: Semantics(
+              button: true,
+              label: selected == null ? '搜尋目的地' : '目的地：${selected.name}，重新搜尋',
+              excludeSemantics: true,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(24),
+                onTap: onSearch,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Icon(
+                          selected == null ? Icons.search : Icons.flag,
+                          color: scheme.primary,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            selected?.name ?? '搜尋目的地',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: selected == null
+                                ? TextStyle(color: scheme.onSurfaceVariant)
+                                : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (selected != null)
+            IconButton(
+              tooltip: '清除目的地',
+              icon: const Icon(Icons.close),
+              onPressed: onClear,
+            ),
+        ],
+      ),
     );
   }
 }

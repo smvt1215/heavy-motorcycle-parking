@@ -11,9 +11,14 @@ import 'package:heavy_parking/features/map/map_controller.dart';
 import 'package:heavy_parking/features/map/map_screen.dart';
 import 'package:heavy_parking/features/map/parking_panel.dart';
 import 'package:heavy_parking/features/map/parking_presentation.dart';
+import 'package:heavy_parking/data/places_repository.dart';
+import 'package:heavy_parking/domain/place.dart';
+import 'package:heavy_parking/features/search/destination_search_controller.dart';
+import 'package:heavy_parking/features/search/destination_search_screen.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import 'fixtures/parking.dart';
+import 'fixtures/places.dart';
 
 class WidgetRepository implements ParkingRepository {
   final queries = <ParkingQuery>[];
@@ -407,5 +412,142 @@ void main() {
           .queryParameters['daddr'],
       '25.0331,121.5628',
     );
+  });
+
+  group('destination search', () {
+    late WidgetRepository repository;
+    late FakePlacesRepository places;
+    late MemoryRecentSearchStore recents;
+    late MapController controller;
+    MapCanvasConfiguration? config;
+
+    Future<void> pumpMap(WidgetTester tester) async {
+      repository = WidgetRepository();
+      controller = MapController(repository);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            mapControllerProvider.overrideWith((ref) => controller),
+            placesRepositoryProvider.overrideWithValue(places),
+            recentSearchStoreProvider.overrideWithValue(recents),
+          ],
+          child: MaterialApp(
+            home: MapScreen(
+              mapBuilder: (_, value) {
+                config = value;
+                return const SizedBox.expand();
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    setUp(() {
+      places = FakePlacesRepository();
+      recents = MemoryRecentSearchStore();
+      config = null;
+    });
+
+    testWidgets('台北101 selects a destination and queries our nearby API',
+        (tester) async {
+      await pumpMap(tester);
+      expect(repository.queries, hasLength(1));
+
+      await tester.tap(find.text('搜尋目的地'));
+      await tester.pumpAndSettle();
+      expect(find.text('輸入目的地，查詢附近可停重機的停車位置。'), findsOneWidget);
+      expect(find.text('地點搜尋由 Google 提供'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), '台北101');
+      await tester.pump(destinationSearchDebounce);
+      await tester.pumpAndSettle();
+      expect(places.autocompleteCalls, hasLength(1));
+      expect(places.autocompleteCalls.single.bias, defaultMapCenter);
+
+      await tester.tap(find.widgetWithText(ListTile, '台北101'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DestinationSearchScreen), findsNothing);
+      expect(
+        places.detailsCalls.single.sessionToken,
+        places.autocompleteCalls.single.sessionToken,
+      );
+      expect(repository.queries, hasLength(2));
+      expect(repository.queries.last.center, taipei101.location);
+      expect(repository.queries.last.vehicle, VehicleType.red);
+      expect(config!.destination?.placeId, taipei101Id);
+      expect(find.text('台北101'), findsOneWidget);
+      expect(find.text('搜尋此區域'), findsNothing);
+      expect(recents.items.single.placeId, taipei101Id);
+
+      await tester.tap(find.byTooltip('清除目的地'));
+      await tester.pumpAndSettle();
+      expect(config!.destination, isNull);
+      expect(find.text('搜尋目的地'), findsOneWidget);
+      expect(repository.queries, hasLength(2));
+    });
+
+    testWidgets('recent search reopens without calling Places', (tester) async {
+      recents.items = [
+        RecentDestination.fromDestination(taipei101, DateTime.now()),
+      ];
+      await pumpMap(tester);
+      await tester.tap(find.text('搜尋目的地'));
+      await tester.pumpAndSettle();
+      expect(find.text('最近搜尋'), findsOneWidget);
+      await tester.tap(find.text('台北101'));
+      await tester.pumpAndSettle();
+      expect(places.autocompleteCalls, isEmpty);
+      expect(places.detailsCalls, isEmpty);
+      expect(repository.queries.last.center, taipei101.location);
+    });
+
+    testWidgets('no result, API error with retry, and cancel keep the map',
+        (tester) async {
+      await pumpMap(tester);
+      await tester.tap(find.text('搜尋目的地'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), '查無此地zz');
+      await tester.pump(destinationSearchDebounce);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('找不到「查無此地zz」'), findsOneWidget);
+
+      places.autocompleteError = const PlacesException(
+        code: PlacesException.unavailable,
+        message: 'off',
+      );
+      await tester.enterText(find.byType(TextField), '台北101');
+      await tester.pump(destinationSearchDebounce);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('目的地搜尋暫時無法使用'), findsOneWidget);
+
+      places.autocompleteError = null;
+      await tester.tap(find.text('重試'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(ListTile, '台北101'), findsOneWidget);
+
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(find.byType(DestinationSearchScreen), findsNothing);
+      expect(repository.queries, hasLength(1));
+      expect(config!.destination, isNull);
+      expect(places.detailsCalls, isEmpty);
+    });
+
+    testWidgets('closing during debounce sends no Places request',
+        (tester) async {
+      await pumpMap(tester);
+      await tester.tap(find.text('搜尋目的地'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '台北101');
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 1));
+      expect(places.autocompleteCalls, isEmpty);
+    });
   });
 }

@@ -44,20 +44,24 @@ Conservative mapping policy:
   never come from generic counts.
 """
 
-import hashlib
-import json
 import math
 import re
 from datetime import datetime, time
 from decimal import Decimal
-from functools import cache
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from pyproj import Transformer
-from pyproj.exceptions import ProjError
-
 from app.ingestion.base import BaseParkingAdapter
+from app.ingestion.common import (
+    _canonical,
+    _coordinate_number,
+    _digest,
+    _in_taiwan,
+    _lot_center,
+    _optional_text,
+    _require_record,
+    _strict_count,
+)
 from app.ingestion.contracts import (
     NormalizedEntrance,
     NormalizedLot,
@@ -70,12 +74,10 @@ from app.ingestion.contracts import (
     RecordError,
 )
 from app.ingestion.rate_parser import MAX_AMOUNT, parse_rate_text
+from app.ingestion.sources import TAIPEI
 from app.models.enums import ParkingSpaceType, RateParseStatus, RateType, RealtimeStatus, VehicleType
 
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
-MAX_COUNT = 2_147_483_647
-LAT_RANGE = (22.0, 26.5)
-LNG_RANGE = (119.0, 123.0)
 
 CAR = "car"
 MOTOR = "motor"
@@ -114,8 +116,6 @@ _RATE_TYPES = {
 }
 _EXCLUDED_RATE_TYPES = frozenset({"9"})
 
-_DIGITS = re.compile(r"[0-9]+")
-_DECIMAL_TEXT = re.compile(r"-?[0-9]+(?:\.[0-9]+)?")
 _MONEY_TEXT = re.compile(r"[0-9]+(?:\.[0-9]+)?")
 _CLOCK = re.compile(r"([0-9]{1,2})(?::([0-9]{2}))?")
 _UPDATETIME = re.compile(
@@ -160,25 +160,6 @@ def parse_updatetime(value: Any) -> datetime | None:
     return parsed
 
 
-@cache
-def _twd97_to_wgs84() -> Transformer:
-    return Transformer.from_crs(3826, 4326, always_xy=True)
-
-
-def _canonical(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-
-
-def _digest(value: Any) -> str:
-    return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()[:24]
-
-
-def _require_record(record: Any) -> dict[str, Any]:
-    if not isinstance(record, dict):
-        raise RecordError("INVALID_RECORD", f"record must be an object, got {type(record).__name__}")
-    return record
-
-
 def _required_text(record: dict[str, Any], field: str) -> str:
     value = record.get(field)
     if isinstance(value, str) and value.strip():
@@ -190,24 +171,6 @@ def _required_text(record: dict[str, Any], field: str) -> str:
     raise RecordError(f"MISSING_{field.upper()}", f"'{field}' must be a non-empty string")
 
 
-def _optional_text(value: Any) -> str | None:
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-def _strict_count(value: Any) -> int | None:
-    """Nonnegative actual int or full ASCII-digit string; anything else -> None."""
-    if type(value) is int:
-        count = value
-    elif isinstance(value, str) and _DIGITS.fullmatch(value):
-        digits = value.lstrip("0") or "0"
-        if len(digits) > 10:
-            return None
-        count = int(digits)
-    else:
-        return None
-    return count if 0 <= count <= MAX_COUNT else None
-
-
 def _capacity(record: dict[str, Any], field: str) -> int | None:
     value = record.get(field)
     if value is None:
@@ -216,42 +179,6 @@ def _capacity(record: dict[str, Any], field: str) -> int | None:
     if count is None:
         raise RecordError("INVALID_CAPACITY", f"'{field}' must be a nonnegative integer, got {value!r}")
     return count
-
-
-def _coordinate_number(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int | float) or isinstance(value, str) and _DECIMAL_TEXT.fullmatch(value):
-        try:
-            number = float(value)
-        except OverflowError:
-            return None
-    else:
-        return None
-    return number if math.isfinite(number) else None
-
-
-def _in_taiwan(lat: float, lng: float) -> bool:
-    return (
-        math.isfinite(lat)
-        and math.isfinite(lng)
-        and LAT_RANGE[0] <= lat <= LAT_RANGE[1]
-        and LNG_RANGE[0] <= lng <= LNG_RANGE[1]
-    )
-
-
-def _lot_center(x_raw: Any, y_raw: Any) -> tuple[float, float]:
-    x = _coordinate_number(x_raw)
-    y = _coordinate_number(y_raw)
-    if x is None or y is None:
-        raise RecordError("INVALID_COORDINATES", f"tw97x/tw97y must be finite numbers, got {x_raw!r}/{y_raw!r}")
-    try:
-        lng, lat = _twd97_to_wgs84().transform(x, y, errcheck=True)
-    except ProjError as exc:
-        raise RecordError("INVALID_COORDINATES", f"TWD97 projection failed: {exc}") from exc
-    if not _in_taiwan(lat, lng):
-        raise RecordError("INVALID_COORDINATES", f"projected lot centre outside Taiwan: lat={lat}, lng={lng}")
-    return lat, lng
 
 
 def _entrances(raw: Any) -> tuple[NormalizedEntrance, ...]:
@@ -425,6 +352,7 @@ def _envelope_data(payload: Any) -> dict[str, Any] | None:
 
 class TaipeiParkingAdapter(BaseParkingAdapter):
     city = "taipei"
+    source = TAIPEI
 
     def records(self, payload: Any) -> list[Any]:
         data = _envelope_data(payload)
@@ -443,6 +371,10 @@ class TaipeiParkingAdapter(BaseParkingAdapter):
         if isinstance(record, dict):
             return _optional_text(record.get("id"))
         return None
+
+    def raw_rate_text(self, record: Any) -> str | None:
+        value = record.get("payex") if isinstance(record, dict) else None
+        return value if isinstance(value, str) else None
 
     def normalize_static(self, record: Any) -> NormalizedLot:
         rec = _require_record(record)

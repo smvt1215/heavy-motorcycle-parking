@@ -5,12 +5,12 @@ from dataclasses import asdict
 from datetime import datetime
 
 from geoalchemy2 import WKTElement
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingestion.contracts import FeedSnapshot, NormalizedLot, NormalizedRealtime, NormalizedZone, RecordError
-from app.ingestion.sources import ATTRIBUTION, AUTHORITY_PRIORITY, FEEDS, LICENSE_URL
+from app.ingestion.sources import TAIPEI, CitySource
 from app.models import (
     DataSource,
     DataSourceType,
@@ -27,9 +27,9 @@ from app.models import (
 )
 
 
-def identity(external_id: str, entity: str, key: str) -> str:
+def identity(external_id: str, entity: str, key: str, prefix: str = TAIPEI.key) -> str:
     digest = hashlib.sha256(f"{external_id}\0{entity}\0{key}".encode()).hexdigest()
-    return f"taipei:{entity}:{digest}"
+    return f"{prefix}:{entity}:{digest}"
 
 
 def point(lat: float, lng: float) -> WKTElement:
@@ -48,19 +48,32 @@ def _older(snapshot: FeedSnapshot, source_updated_at: datetime | None, fetched_a
 
 
 class ParkingIngestionWriter:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, source: CitySource = TAIPEI):
         self.session = session
+        self.source = source
+
+    def identity(self, external_id: str, entity: str, key: str) -> str:
+        return identity(external_id, entity, key, self.source.identity_prefix())
+
+    async def active_lot_count(self, source_id: int) -> int:
+        return (
+            await self.session.scalar(
+                select(func.count(func.distinct(ParkingZone.parking_id))).where(
+                    ParkingZone.source_id == source_id, ParkingZone.source_active.is_(True)
+                )
+            )
+        ) or 0
 
     async def ensure_sources(self) -> dict[str, int]:
         ids = {}
-        for kind, policy in FEEDS.items():
+        for kind, policy in self.source.feeds.items():
             values = dict(
                 code=policy.code,
                 name=policy.name,
                 source_type=DataSourceType.GOVERNMENT,
                 url=policy.url,
-                license=LICENSE_URL,
-                attribution=ATTRIBUTION,
+                license=self.source.license_url,
+                attribution=self.source.attribution,
                 freshness_seconds=policy.freshness_seconds,
                 freshness_uses_source_timestamp=policy.freshness_uses_source_timestamp,
             )
@@ -83,7 +96,7 @@ class ParkingIngestionWriter:
             existing = ParkingLot(source_id=source_id, external_id=lot.external_id)
             self.session.add(existing)
         existing.name, existing.address, existing.district = lot.name, lot.address, lot.district
-        existing.city, existing.location = "臺北市", point(lot.lat, lot.lng)
+        existing.city, existing.location = self.source.city_name, point(lot.lat, lot.lng)
         existing.source_updated_at, existing.fetched_at = snapshot.source_updated_at, snapshot.fetched_at
         await self.session.flush()
 
@@ -113,7 +126,7 @@ class ParkingIngestionWriter:
                     None,
                     snapshot,
                     source_id,
-                    source_record_id=identity(lot.external_id, "rule", (old.external_id or "").rsplit(":", 1)[-1]),
+                    source_record_id=self.identity(lot.external_id, "rule", (old.external_id or "").rsplit(":", 1)[-1]),
                 )
 
         rates = (
@@ -124,7 +137,9 @@ class ParkingIngestionWriter:
             )
         ).all()
         live_rates = {
-            identity(lot.external_id, "rate", f"{zone.key}:{rate.key}") for zone in lot.zones for rate in zone.rates
+            self.identity(lot.external_id, "rate", f"{zone.key}:{rate.key}")
+            for zone in lot.zones
+            for rate in zone.rates
         }
         for rate in rates:
             if rate.source_record_id not in live_rates and rate.effective_to is None:
@@ -139,7 +154,7 @@ class ParkingIngestionWriter:
         ).all()
         live_entrances = set()
         for entry in lot.entrances:
-            key = identity(lot.external_id, "entrance", entry.key)
+            key = self.identity(lot.external_id, "entrance", entry.key)
             live_entrances.add(key)
             entity = next((e for e in old_entrances if e.source_record_id == key), None)
             if entity is None:
@@ -187,7 +202,7 @@ class ParkingIngestionWriter:
             source_id,
         )
         for rate in zone.rates:
-            key = identity(external_id, "rate", f"{zone.key}:{rate.key}")
+            key = self.identity(external_id, "rate", f"{zone.key}:{rate.key}")
             versions = (
                 await self.session.scalars(
                     select(ParkingRate).where(ParkingRate.source_id == source_id, ParkingRate.source_record_id == key)
@@ -246,7 +261,7 @@ class ParkingIngestionWriter:
         *,
         source_record_id=None,
     ):
-        record_id = source_record_id or identity(external_id, "rule", key)
+        record_id = source_record_id or self.identity(external_id, "rule", key)
         row = (
             await self.session.scalars(
                 select(ParkingRule).where(ParkingRule.source_id == source_id, ParkingRule.source_record_id == record_id)
@@ -257,9 +272,9 @@ class ParkingIngestionWriter:
             self.session.add(row)
         row.green_plate_allowed, row.white_plate_allowed = green, white
         row.yellow_plate_allowed, row.red_plate_allowed, row.car_allowed = yellow, red, car
-        row.rule_kind, row.authority_priority, row.active = RuleKind.BASELINE, AUTHORITY_PRIORITY, True
+        row.rule_kind, row.authority_priority, row.active = RuleKind.BASELINE, self.source.authority_priority, True
         row.confidence = None
-        row.notes = "Taipei V2 explicit category counts; generic car/motor counts do not confirm heavy permission"
+        row.notes = self.source.rule_note
         row.source_updated_at, row.fetched_at = snapshot.source_updated_at, snapshot.fetched_at
 
     async def write_realtime(
@@ -311,7 +326,7 @@ class ParkingIngestionWriter:
                 status = RealtimeStatus.UNKNOWN
             if status == RealtimeStatus.UNKNOWN:
                 available, total = None, None
-            record_key = identity(record.external_id, "realtime", observation.zone_key)
+            record_key = self.identity(record.external_id, "realtime", observation.zone_key)
             if (
                 latest is not None
                 and latest.fetched_at == snapshot.fetched_at
@@ -332,7 +347,9 @@ class ParkingIngestionWriter:
                     fetched_at=snapshot.fetched_at,
                 )
             )
-        if matched == 0:
+        if matched == 0 and any(o.status != RealtimeStatus.UNKNOWN for o in record.observations):
+            # An UNKNOWN-only record for a lot without that category has nothing to
+            # record or supersede; a known count without a zone is a real mismatch.
             raise RecordError("ZONE_NOT_IMPORTED", "No corresponding category zone exists in static data")
 
     async def reconcile_missing_lots(self, present_ids: set[str], snapshot: FeedSnapshot, source_id: int) -> None:

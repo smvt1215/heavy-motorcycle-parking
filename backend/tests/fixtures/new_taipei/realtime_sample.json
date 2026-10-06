@@ -1,0 +1,31 @@
+{
+ "page_size": 1000,
+ "pages": [
+  [
+   {
+    "ID": "010056",
+    "AVAILABLECAR": "-9"
+   },
+   {
+    "ID": "110014",
+    "AVAILABLECAR": "18"
+   },
+   {
+    "ID": "110052",
+    "AVAILABLECAR": "139"
+   },
+   {
+    "ID": "010152",
+    "AVAILABLECAR": "44"
+   },
+   {
+    "ID": "010189",
+    "AVAILABLECAR": "-9"
+   },
+   {
+    "ID": "060145",
+    "AVAILABLECAR": "4"
+   }
+  ]
+ ]
+}

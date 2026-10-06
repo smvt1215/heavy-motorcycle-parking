@@ -1,4 +1,4 @@
-"""One-shot Taipei worker; a scheduler can invoke it without API/router coupling."""
+"""One-shot city parking worker; a scheduler can invoke it without API/router coupling."""
 
 import argparse
 import asyncio
@@ -13,12 +13,16 @@ from app.cache import get_redis
 from app.db import get_db_engine, get_sessionmaker
 from app.ingestion.contracts import FeedSnapshot
 from app.ingestion.downloader import DownloadError, ParkingDownloader, decode_json
+from app.ingestion.new_taipei import NewTaipeiParkingAdapter
 from app.ingestion.pipeline import ParkingIngestionPipeline
 from app.ingestion.taipei import TaipeiParkingAdapter
 
+ADAPTERS = {"taipei": TaipeiParkingAdapter, "new_taipei": NewTaipeiParkingAdapter}
+
 
 def parser() -> argparse.ArgumentParser:
-    arguments = argparse.ArgumentParser(description="Import Taipei parking V2 feeds with retained raw evidence")
+    arguments = argparse.ArgumentParser(description="Import city parking feeds with retained raw evidence")
+    arguments.add_argument("--city", choices=tuple(ADAPTERS), default="taipei")
     arguments.add_argument("--feed", choices=("static", "realtime", "all"), default="all")
     arguments.add_argument("--static-file", type=Path)
     arguments.add_argument("--realtime-file", type=Path)
@@ -42,7 +46,7 @@ async def run(options: argparse.Namespace) -> int:
         raise ValueError(
             "File replay requires a file for every selected feed and must not mix replay with live downloads"
         )
-    adapter, cache = TaipeiParkingAdapter(), None if options.no_cache else get_redis()
+    adapter, cache = ADAPTERS[options.city](), None if options.no_cache else get_redis()
     exit_code = 0
     try:
         async with httpx.AsyncClient(follow_redirects=False) as client:

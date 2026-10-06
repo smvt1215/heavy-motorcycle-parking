@@ -29,6 +29,13 @@ Workers -> raw source -> adapter -> normalizer -> validator -> rule mapping -> D
 `app/`, `core/`, `design_system/`, `features/`, `domain/`, `data/`.
 Shared business logic; platform-adaptive iOS/Android presentation.
 
+M5 [Flutter map experience](flutter-map.md) connects typed parking DTOs and a Dio
+repository to a persistent Riverpod map controller. Camera updates are committed
+only by explicit area search; pinned queries and request generations preserve
+selected-vehicle and pagination context. The map and zone panel render separate
+rule/rate/realtime/entrance facts and use foreground-only location plus external
+navigation.
+
 ## Backend architecture
 Router -> Service/Domain -> Repository -> DB. Routers must not contain business rules or raw SQL.
 

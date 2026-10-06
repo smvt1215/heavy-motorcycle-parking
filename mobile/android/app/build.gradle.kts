@@ -27,6 +27,10 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["MAPS_API_KEY"] =
+            providers.gradleProperty("MAPS_API_KEY").orElse(
+                providers.environmentVariable("MAPS_API_KEY")
+            ).getOrElse("")
     }
 
     buildTypes {

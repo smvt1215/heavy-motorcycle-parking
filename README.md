@@ -63,6 +63,10 @@ Production API workers require the same `CURSOR_SIGNING_KEY` secret of at least
 
 ### Mobile
 
+The M5 map home screen provides clustered markers, YELLOW/RED vehicle selection,
+backend filters and a zone-scoped parking panel. Set restricted native Maps SDK
+keys and `API_BASE_URL` before device testing; see [Flutter map setup](docs/flutter-map.md).
+
 1. Navigate to the mobile directory:
    ```bash
    cd mobile

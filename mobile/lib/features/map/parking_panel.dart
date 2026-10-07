@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/navigation_service.dart';
 import '../../domain/parking.dart';
+import '../account/account_controller.dart';
+import '../account/account_sheet.dart';
+import '../reports/report_sheet.dart';
 import 'map_controller.dart';
 import 'marker_icons.dart';
 import 'parking_presentation.dart';
@@ -109,6 +112,10 @@ class ParkingPanel extends ConsumerWidget {
               ),
               Text(
                 '${distanceLabel(lot.distanceM)} · ${state.query.vehicle.label}',
+              ),
+              _CommunityActions(
+                lot: lot,
+                zones: state.detail?.zones ?? lot.zones,
               ),
               const SizedBox(height: 12),
               _Compatibility(status: lot.compatibility),
@@ -403,4 +410,62 @@ class _EntranceFacts extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// Favorite and report actions. Guests are offered sign-in instead.
+class _CommunityActions extends ConsumerWidget {
+  const _CommunityActions({required this.lot, required this.zones});
+  final ParkingLot lot;
+  final List<ParkingZone> zones;
+
+  void _signIn(BuildContext context) => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => const AccountSheet(),
+      );
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final signedIn =
+        ref.watch(authControllerProvider.select((a) => a.isSignedIn));
+    final favorites = ref.watch(favoritesControllerProvider);
+    final favorite = favorites.contains(lot.id);
+    final pending = favorites.pending.contains(lot.id);
+    return Wrap(
+      spacing: 8,
+      children: [
+        OutlinedButton.icon(
+          onPressed: pending
+              ? null
+              : () async {
+                  if (!signedIn) return _signIn(context);
+                  final ok = await ref
+                      .read(favoritesControllerProvider.notifier)
+                      .toggle(lot.id);
+                  if (!ok && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('收藏更新失敗，請稍後再試。')),
+                    );
+                  }
+                },
+          icon: Icon(favorite ? Icons.favorite : Icons.favorite_border),
+          label: Text(favorite ? '已收藏' : '收藏'),
+        ),
+        OutlinedButton.icon(
+          onPressed: () {
+            if (!signedIn) return _signIn(context);
+            showModalBottomSheet<void>(
+              context: context,
+              isScrollControlled: true,
+              showDragHandle: true,
+              builder: (_) => ReportSheet(lot: lot, zones: zones),
+            );
+          },
+          icon: const Icon(Icons.flag_outlined),
+          label: const Text('回報問題'),
+        ),
+      ],
+    );
+  }
 }

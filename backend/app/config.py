@@ -20,8 +20,24 @@ class Settings(BaseSettings):
     google_places_api_key: SecretStr | None = None
     places_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     places_rate_limit_per_minute: int = Field(default=60, ge=1, le=10_000)
+    # Opaque bearer tokens; only their SHA-256 digests are stored.
+    access_token_ttl_days: int = Field(default=30, ge=1, le=365)
+    # S3-compatible report photo storage. Credentials come from the environment only.
+    s3_bucket: str | None = None
+    s3_endpoint_url: str | None = None
+    s3_region: str = "ap-northeast-1"
+    s3_access_key_id: SecretStr | None = None
+    s3_secret_access_key: SecretStr | None = None
+    report_photo_max_bytes: int = Field(default=5_000_000, ge=1, le=20_000_000)
 
-    @field_validator("google_places_api_key", mode="before")
+    @field_validator(
+        "google_places_api_key",
+        "s3_bucket",
+        "s3_endpoint_url",
+        "s3_access_key_id",
+        "s3_secret_access_key",
+        mode="before",
+    )
     @classmethod
     def blank_places_key_is_unset(cls, value):
         return None if isinstance(value, str) and not value.strip() else value

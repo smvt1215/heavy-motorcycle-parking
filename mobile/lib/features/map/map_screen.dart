@@ -8,6 +8,8 @@ import '../../data/location_service.dart';
 import '../../data/map_configuration.dart';
 import '../../domain/parking.dart';
 import '../../domain/place.dart';
+import '../account/account_controller.dart';
+import '../account/account_sheet.dart';
 import '../search/destination_search_screen.dart';
 import 'filters_sheet.dart';
 import 'map_controller.dart';
@@ -132,6 +134,25 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
+  void _moveTo(CameraRequest? previous, CameraRequest? next) {
+    if (next == null || identical(previous, next)) return;
+    unawaited(
+      _map?.animateCamera(
+        CameraUpdate.newLatLngZoom(
+          LatLng(next.target.lat, next.target.lng),
+          16,
+        ),
+      ),
+    );
+  }
+
+  void _openAccount() => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => const AccountSheet(),
+      );
+
   void _message(String message) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(message)));
 
@@ -152,6 +173,19 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     ref.listen<PlaceDestination?>(
       mapControllerProvider.select((state) => state.destination),
       _moveCamera,
+    );
+    ref.listen<CameraRequest?>(
+      mapControllerProvider.select((state) => state.cameraRequest),
+      _moveTo,
+    );
+    // The saved preference only seeds the map's explicit vehicle selection.
+    ref.listen<VehicleType?>(
+      authControllerProvider.select((auth) => auth.profile?.preferredVehicle),
+      (previous, next) {
+        if (next != null && next != previous) {
+          unawaited(ref.read(mapControllerProvider.notifier).setVehicle(next));
+        }
+      },
     );
     final state = ref.watch(mapControllerProvider);
     final controller = ref.read(mapControllerProvider.notifier);
@@ -218,6 +252,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                             selected: {state.query.vehicle},
                             onSelectionChanged: (selection) =>
                                 controller.setVehicle(selection.single),
+                          ),
+                          IconButton(
+                            tooltip: '我的帳號',
+                            onPressed: _openAccount,
+                            icon: const Icon(Icons.account_circle_outlined),
                           ),
                         ],
                       ),

@@ -29,12 +29,40 @@ class User(TimestampMixin, Base):
     """Local profile keyed by the identity provider's token subject; no credentials stored."""
 
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("auth_subject", name="uq_users_auth_subject"),)
+    __table_args__ = (
+        UniqueConstraint("auth_subject", name="uq_users_auth_subject"),
+        CheckConstraint("role IN ('USER', 'MODERATOR')", name="ck_users_role"),
+        CheckConstraint(
+            "preferred_vehicle IS NULL OR preferred_vehicle IN ('YELLOW', 'RED')",
+            name="ck_users_preferred_vehicle_heavy",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     auth_subject: Mapped[str] = mapped_column(String(255))
     email: Mapped[str | None] = mapped_column(String(320))
     display_name: Mapped[str | None] = mapped_column(String(100))
+    role: Mapped[str] = mapped_column(String(16), server_default=text("'USER'"))
+    # A client-side default only; selected-vehicle endpoints never read it.
+    preferred_vehicle: Mapped[VehicleType | None] = mapped_column(vehicle_type_enum)
+
+
+class AccessToken(CreatedAtMixin, Base):
+    """Opaque bearer token. Only its SHA-256 digest is stored, never the token itself."""
+
+    __tablename__ = "access_tokens"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id"], ["users.id"], name="fk_access_tokens_user_id_users", ondelete="CASCADE"),
+        UniqueConstraint("token_hash", name="uq_access_tokens_token_hash"),
+        CheckConstraint("expires_at > created_at", name="ck_access_tokens_expires_after_created"),
+        Index("ix_access_tokens_user_id", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer)
+    token_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class UserVehicle(TimestampMixin, Base):
@@ -75,6 +103,12 @@ class UserReport(TimestampMixin, Base):
     __table_args__ = (
         ForeignKeyConstraint(["user_id"], ["users.id"], name="fk_user_reports_user_id_users", ondelete="SET NULL"),
         ForeignKeyConstraint(
+            ["resolved_by_user_id"],
+            ["users.id"],
+            name="fk_user_reports_resolved_by_user_id_users",
+            ondelete="SET NULL",
+        ),
+        ForeignKeyConstraint(
             ["parking_id"], ["parking_lots.id"], name="fk_user_reports_parking_id_parking_lots", ondelete="CASCADE"
         ),
         # Same-lot zone guard. NO ACTION (checked at statement end) so a lot-delete cascade can remove both.
@@ -99,6 +133,7 @@ class UserReport(TimestampMixin, Base):
     status: Mapped[ReportStatus] = mapped_column(report_status_enum, server_default=text("'PENDING'"))
     description: Mapped[str | None] = mapped_column(Text)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by_user_id: Mapped[int | None] = mapped_column(Integer)
 
 
 class ReportPhoto(CreatedAtMixin, Base):

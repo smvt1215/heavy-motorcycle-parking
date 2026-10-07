@@ -27,6 +27,12 @@ bool _sameCenter(GeoPoint a, GeoPoint b) =>
 
 const Object _unset = Object();
 
+class CameraRequest {
+  const CameraRequest(this.target, this.serial);
+  final GeoPoint target;
+  final int serial;
+}
+
 class MapState {
   const MapState({
     required this.query,
@@ -45,6 +51,7 @@ class MapState {
     this.sortVersion,
     this.hasSearched = false,
     this.destination,
+    this.cameraRequest,
   });
 
   /// Committed query; its center is the last searched center.
@@ -74,6 +81,9 @@ class MapState {
   /// nearby query; it carries no parking facts.
   final PlaceDestination? destination;
 
+  /// Programmatic camera move (e.g. opening a favorite); a new instance per move.
+  final CameraRequest? cameraRequest;
+
   MapState copyWith({
     ParkingQuery? query,
     List<ParkingLot>? items,
@@ -91,6 +101,7 @@ class MapState {
     Object? sortVersion = _unset,
     bool? hasSearched,
     Object? destination = _unset,
+    Object? cameraRequest = _unset,
   }) =>
       MapState(
         query: query ?? this.query,
@@ -124,6 +135,9 @@ class MapState {
         destination: identical(destination, _unset)
             ? this.destination
             : destination as PlaceDestination?,
+        cameraRequest: identical(cameraRequest, _unset)
+            ? this.cameraRequest
+            : cameraRequest as CameraRequest?,
       );
 }
 
@@ -147,6 +161,7 @@ class MapController extends StateNotifier<MapState> {
 
   /// Latest camera center reported by the map; never triggers a request.
   GeoPoint? _cameraCenter;
+  int _cameraSerial = 0;
 
   /// Explicit `搜尋此區域`/initial search at the latest camera center.
   Future<void> search() {
@@ -180,6 +195,20 @@ class MapController extends StateNotifier<MapState> {
     state = state.copyWith(destination: destination);
     return _runSearch(
       state.query.copyWith(center: destination.location),
+      clearAreaPrompt: true,
+    );
+  }
+
+  /// Moves the camera to [center] and searches there with the current
+  /// explicit vehicle and filters (used for saved favorites).
+  Future<void> focus(GeoPoint center) {
+    if (!center.isValid) throw ArgumentError.value(center, 'center');
+    _cameraCenter = center;
+    state = state.copyWith(
+      cameraRequest: CameraRequest(center, ++_cameraSerial),
+    );
+    return _runSearch(
+      state.query.copyWith(center: center),
       clearAreaPrompt: true,
     );
   }

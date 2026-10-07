@@ -175,8 +175,8 @@ Live-source manual verification uses a disposable database and never rewrites
 the user's running API/database.
 
 This milestone does not add a production scheduler, distributed task queue,
-retention jobs, official holiday calendar, source-specific cache invalidation,
-or New Taipei support. A forced process termination can leave a durable RUNNING
+retention jobs, official holiday calendar or source-specific cache invalidation.
+New Taipei support was added in M7; see [New Taipei ingestion](new-taipei-ingestion.md). A forced process termination can leave a durable RUNNING
 batch requiring operator inspection/replay. A failed static record retains its
 previous source facts and older provenance. Lots absent from a newer complete feed
 receive NULL permission rules, inactive source zones, retired rates and null

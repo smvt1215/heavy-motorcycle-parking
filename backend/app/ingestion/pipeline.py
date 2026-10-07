@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ingestion.base import BaseParkingAdapter
 from app.ingestion.contracts import FeedSnapshot, ImportResult, RecordError
 from app.ingestion.downloader import DownloadError, ParkingDownloader
-from app.ingestion.sources import FEEDS, TAIPEI_INGESTION_LOCK
 from app.ingestion.writer import ParkingIngestionWriter
 from app.models import ImportBatchStatus, RawImportBatch, RawParkingRecord, RawRecordStatus
 
@@ -23,10 +22,18 @@ from app.models import ImportBatchStatus, RawImportBatch, RawParkingRecord, RawR
 class ParkingIngestionPipeline:
     def __init__(self, session: AsyncSession, adapter: BaseParkingAdapter, *, cache: Any = None):
         self.session, self.adapter, self.cache = session, adapter, cache
-        self.writer = ParkingIngestionWriter(session)
+        self.source = adapter.source
+        self.writer = ParkingIngestionWriter(session, self.source)
+
+    def _record_id(self, record: Any) -> str | None:
+        try:
+            value = self.adapter.record_key(record)
+        except Exception:  # noqa: BLE001 - bookkeeping must never fail the batch
+            return None
+        return value.strip() if isinstance(value, str) and 0 < len(value.strip()) <= 240 else None
 
     async def download_and_ingest(self, kind: str, downloader: ParkingDownloader) -> ImportResult:
-        policy = FEEDS[kind]
+        policy = self.source.feeds[kind]
         try:
             download = await downloader.fetch(policy)
         except DownloadError as exc:
@@ -41,7 +48,7 @@ class ParkingIngestionPipeline:
             batch = RawImportBatch(
                 source_id=sources[kind],
                 feed_kind=kind,
-                raw_payload=error.evidence,
+                raw_payload=_stored_payload(error.evidence),
                 fetched_at=error.fetched_at,
                 started_at=datetime.now(UTC),
                 finished_at=datetime.now(UTC),
@@ -57,7 +64,7 @@ class ParkingIngestionPipeline:
         return ImportResult(batch_id, ImportBatchStatus.FAILED, 0, 0, 0)
 
     async def ingest(self, snapshot: FeedSnapshot) -> ImportResult:
-        if snapshot.kind not in FEEDS or snapshot.fetched_at.utcoffset() is None:
+        if snapshot.kind not in self.source.feeds or snapshot.fetched_at.utcoffset() is None:
             raise ValueError("Known feed and absolute fetched_at are required")
         if snapshot.source_updated_at is not None and snapshot.source_updated_at.utcoffset() is None:
             raise ValueError("source_updated_at must be an absolute instant")
@@ -97,12 +104,10 @@ class ParkingIngestionPipeline:
                 raw = RawParkingRecord(
                     batch_id=batch_id,
                     source_id=sources[snapshot.kind],
-                    external_id=_safe_text(_record_id(record)),
+                    external_id=_safe_text(self._record_id(record)),
                     record_type=snapshot.kind,
                     payload=_stored_payload(record if isinstance(record, dict) else {"_value": record}),
-                    raw_rate_text=_safe_text(record.get("payex"))
-                    if isinstance(record, dict) and isinstance(record.get("payex"), str)
-                    else None,
+                    raw_rate_text=_safe_text(self.adapter.raw_rate_text(record)),
                     source_updated_at=evidence.source_updated_at,
                     fetched_at=snapshot.fetched_at,
                     status=RawRecordStatus.PENDING,
@@ -114,16 +119,22 @@ class ParkingIngestionPipeline:
         if envelope_error is not None:
             return await self._finish(batch_id, 0, 0, {envelope_error.code: 1}, force_failed=True, warnings=warnings)
         normalized, failed, errors = 0, 0, Counter()
-        conflicts = _conflicting_ids(records)
+        conflicts = _conflicting_ids(records, self._record_id)
         seen = set()
         try:
             async with self.session.begin():
                 # Both feeds share this transaction lock. Stable child identities
                 # and monotonic update checks must also hold for overlapping workers.
-                await self.session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": TAIPEI_INGESTION_LOCK})
-                for record, raw_id in zip(records, raw_ids, strict=True):
+                await self.session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": self.source.lock_key})
+                for index, (record, raw_id) in enumerate(zip(records, raw_ids, strict=True)):
+                    if index:
+                        # Persist the previous record's statuses, then drop loaded ORM
+                        # objects: one long transaction must not make every autoflush
+                        # scan an ever-growing identity map (O(n^2) for large feeds).
+                        await self.session.flush()
+                        self.session.expunge_all()
                     raw = await self.session.get(RawParkingRecord, raw_id)
-                    external_id = _record_id(record)
+                    external_id = self._record_id(record)
                     try:
                         if _unsupported_json(record):
                             raise RecordError("UNSUPPORTED_JSON_VALUE", "Record contains a value unsupported by JSONB")
@@ -170,11 +181,11 @@ class ParkingIngestionPipeline:
                         errors[code] += 1
                         failed += 1
                 if snapshot.kind == "static":
-                    await self.writer.reconcile_missing_lots(
-                        {key for record in records if (key := _record_id(record)) is not None},
-                        snapshot,
-                        sources["static"],
-                    )
+                    present = {key for record in records if (key := self._record_id(record)) is not None}
+                    if await self._snapshot_complete_enough(present, sources["static"]):
+                        await self.writer.reconcile_missing_lots(present, snapshot, sources["static"])
+                    else:
+                        warnings["RECONCILE_SKIPPED_INCOMPLETE_SNAPSHOT"] = 1
         except Exception:
             # Fatal failures roll back normalized writes as a unit. Mark every raw
             # row failed instead of claiming successful writes that were rolled back.
@@ -194,7 +205,7 @@ class ParkingIngestionPipeline:
         if self.cache is not None:
             try:
                 await self.cache.set(
-                    f"ingestion:taipei:{snapshot.kind}:latest",
+                    f"ingestion:{self.source.key}:{snapshot.kind}:latest",
                     json.dumps(
                         {
                             "batch_id": result.batch_id,
@@ -204,13 +215,25 @@ class ParkingIngestionPipeline:
                             "failed": result.failed,
                         }
                     ),
-                    ex=FEEDS[snapshot.kind].freshness_seconds,
+                    ex=self.source.feeds[snapshot.kind].freshness_seconds,
                 )
             except Exception:
                 async with self.session.begin():
                     batch = await self.session.get(RawImportBatch, batch_id)
                     batch.error_summary = {**(batch.error_summary or {}), "cache": "UNAVAILABLE"}
         return result
+
+    async def _snapshot_complete_enough(self, present: set[str], static_source_id: int) -> bool:
+        """Guard paged sources: a truncated snapshot must not retire valid lots.
+
+        Compares unique lot IDs with lots that currently have an active source zone.
+        Without a configured ratio every valid snapshot is complete (Taipei semantics).
+        """
+        ratio = self.source.feeds["static"].reconcile_min_ratio
+        if ratio is None:
+            return True
+        baseline = await self.writer.active_lot_count(static_source_id)
+        return len(present) >= ratio * baseline
 
     async def _finish(self, batch_id, normalized, failed, errors, *, force_failed=False, warnings=None) -> ImportResult:
         status = (
@@ -230,15 +253,10 @@ class ParkingIngestionPipeline:
         return ImportResult(batch_id, status, total, normalized, failed)
 
 
-def _record_id(record: Any) -> str | None:
-    value = record.get("id") if isinstance(record, dict) else None
-    return value.strip() if isinstance(value, str) and 0 < len(value.strip()) <= 240 else None
-
-
-def _conflicting_ids(records: list[Any]) -> set[str]:
+def _conflicting_ids(records: list[Any], record_id) -> set[str]:
     representations, conflicts = {}, set()
     for record in records:
-        external_id = _record_id(record)
+        external_id = record_id(record)
         if external_id is None:
             continue
         representation = json.dumps(record, sort_keys=True, ensure_ascii=False, separators=(",", ":"))

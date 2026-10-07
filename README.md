@@ -111,6 +111,7 @@ See the [docs/](docs/) directory for detailed architecture decisions.
 
 To import Taipei parking data after backend migrations, run
 `python -m app.ingestion.cli --feed all` from `backend/`.
+See [New Taipei ingestion](docs/new-taipei-ingestion.md) for `--city new_taipei`.
 See [Taipei ingestion](docs/taipei-ingestion.md) for source mappings, strict
 unknown-data handling, file replay and observable record failures.
 

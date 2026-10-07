@@ -9,12 +9,14 @@ from datetime import datetime
 from typing import Any
 
 from app.ingestion.contracts import NormalizedLot, NormalizedRealtime
+from app.ingestion.sources import CitySource
 
 
 class BaseParkingAdapter(ABC):
     """Source-specific parsing; city formats never leak into domain logic."""
 
     city: str
+    source: CitySource
 
     @abstractmethod
     def records(self, payload: Any) -> list[Any]:
@@ -34,4 +36,8 @@ class BaseParkingAdapter(ABC):
 
     def record_key(self, record: Any) -> str | None:
         """Best-effort source identifier for raw-record bookkeeping; never raises."""
+        return None
+
+    def raw_rate_text(self, record: Any) -> str | None:
+        """Verbatim fee text retained on the raw record; never raises."""
         return None

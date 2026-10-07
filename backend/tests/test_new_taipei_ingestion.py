@@ -1,5 +1,6 @@
 """New Taipei paged downloads and live PostGIS ingestion alongside Taipei."""
 
+import base64
 import copy
 import json
 from datetime import UTC, datetime, timedelta
@@ -102,6 +103,47 @@ async def test_any_failed_page_fails_the_whole_snapshot():
         with pytest.raises(DownloadError) as caught:
             await ParkingDownloader(client, sleep=sleep, clock=lambda: NOW).fetch(small(NEW_TAIPEI_STATIC))
     assert caught.value.code == "HTTP_RETRYABLE" and len(delays) == 3
+    # Pages already received and the first receipt instant stay auditable.
+    assert caught.value.fetched_at == NOW
+    assert caught.value.evidence == {
+        "page_size": 2,
+        "pages": [pages[0]],
+        "failed_page": 1,
+        "failed_page_evidence": None,
+    }
+
+
+async def test_invalid_json_on_later_page_keeps_earlier_pages_and_its_bytes():
+    def respond(request):
+        if request.url.params["page"] == "0":
+            return httpx.Response(200, json=[{"ID": "1"}, {"ID": "2"}])
+        return httpx.Response(200, content=b"not json")
+
+    clock = iter([NOW, NOW + timedelta(seconds=1)])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(DownloadError) as caught:
+            await ParkingDownloader(client, clock=lambda: next(clock)).fetch(small(NEW_TAIPEI_STATIC))
+    assert caught.value.code == "INVALID_JSON" and caught.value.fetched_at == NOW
+    evidence = caught.value.evidence
+    assert evidence["pages"] == [[{"ID": "1"}, {"ID": "2"}]] and evidence["failed_page"] == 1
+    assert base64.b64decode(evidence["failed_page_evidence"]["body_base64"]) == b"not json"
+
+
+async def test_partial_page_failure_is_recorded_with_evidence(live):
+    session, pipeline = live
+    error = DownloadError(
+        "HTTP_RETRYABLE",
+        "Page 1: Source HTTP 503",
+        evidence={"page_size": 1000, "pages": [[{"ID": "1"}]], "failed_page": 1, "failed_page_evidence": None},
+        fetched_at=NOW,
+    )
+    result = await pipeline.record_download_failure("static", error)
+    assert result.status == "FAILED"
+    async with session.begin():
+        batch = await session.get(RawImportBatch, result.batch_id)
+        assert batch.raw_payload["pages"] == [[{"ID": "1"}]] and batch.fetched_at == NOW
+        assert batch.error_summary["errors"] == {"HTTP_RETRYABLE": 1}
+        assert await session.scalar(select(func.count()).select_from(ParkingLot)) == 0
 
 
 async def test_non_array_page_and_runaway_pagination_are_download_failures():
@@ -111,7 +153,8 @@ async def test_non_array_page_and_runaway_pagination_are_download_failures():
     async with httpx.AsyncClient(transport=httpx.MockTransport(object_page)) as client:
         with pytest.raises(DownloadError) as caught:
             await ParkingDownloader(client, clock=lambda: NOW).fetch(small(NEW_TAIPEI_STATIC))
-    assert caught.value.code == "INVALID_PAGE" and caught.value.evidence["page"] == 0
+    assert caught.value.code == "INVALID_PAGE" and caught.value.evidence["failed_page"] == 0
+    assert caught.value.evidence["failed_page_evidence"] == {"message": "maintenance"}
 
     seen = []
     full = [[{"ID": str(i)}, {"ID": f"{i}b"}] for i in range(10)]

@@ -59,28 +59,42 @@ class ParkingDownloader:
 
         The envelope keeps each page verbatim so raw evidence shows page boundaries.
         The snapshot's fetch instant is the *first* page receipt, so freshness never
-        looks newer than the oldest data in the snapshot.
+        looks newer than the oldest data in the snapshot. A failure keeps every page
+        already received plus the failing page's own evidence, so a partial upstream
+        failure stays auditable.
         """
         pages: list[Any] = []
         fetched_at = None
+
+        def failure(code: str, message: str, page: int, page_evidence: Any = None) -> DownloadError:
+            return DownloadError(
+                code,
+                message,
+                evidence={
+                    "page_size": policy.page_size,
+                    "pages": pages,
+                    "failed_page": page,
+                    "failed_page_evidence": page_evidence,
+                },
+                fetched_at=fetched_at,
+            )
+
         for page in range(policy.max_pages):
-            download = await self._fetch_one(policy.url, {"page": page, "size": policy.page_size})
+            try:
+                download = await self._fetch_one(policy.url, {"page": page, "size": policy.page_size})
+            except DownloadError as exc:
+                if fetched_at is None:
+                    fetched_at = exc.fetched_at
+                raise failure(exc.code, f"Page {page}: {exc}", page, exc.evidence) from exc
             fetched_at = fetched_at or download.fetched_at
             if not isinstance(download.payload, list):
-                raise DownloadError(
-                    "INVALID_PAGE",
-                    f"Page {page} is not a JSON array",
-                    evidence={"page": page, "payload": download.payload},
-                    fetched_at=fetched_at,
-                )
+                raise failure("INVALID_PAGE", f"Page {page} is not a JSON array", page, download.payload)
             pages.append(download.payload)
             if len(download.payload) < policy.page_size:
                 # The receipt of the final page completes the snapshot.
                 return Download({"page_size": policy.page_size, "pages": pages}, fetched_at)
-        raise DownloadError(
-            "PAGE_LIMIT_EXCEEDED",
-            f"Source still returned full pages after {policy.max_pages} pages",
-            fetched_at=fetched_at,
+        raise failure(
+            "PAGE_LIMIT_EXCEEDED", f"Source still returned full pages after {policy.max_pages} pages", policy.max_pages
         )
 
     async def _fetch_one(self, url: str, params: dict[str, Any] | None) -> Download:

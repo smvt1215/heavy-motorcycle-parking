@@ -49,7 +49,9 @@ PARTIAL/NONE remain unknown totals. It uses the server aggregate status rather
 than reconstructing it from child statuses. Nearby facts retain their own fetch
 timestamps; there is no automatic background refresh in M5.
 
-System light/dark mode changes both app and map styles. Standard Flutter controls
+System light/dark mode changes both app and map styles; M9 adds a 跟隨系統/淺色/深色
+setting, high-contrast themes, Dynamic Color and Reduce Motion handling
+([accessibility audit](accessibility-audit.md)). Standard Flutter controls
 provide accessibility semantics; controls are at least 48 logical pixels.
 
 ## Run locally

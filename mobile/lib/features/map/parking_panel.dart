@@ -5,6 +5,8 @@ import '../../data/navigation_service.dart';
 import '../../domain/parking.dart';
 import '../account/account_controller.dart';
 import '../account/account_sheet.dart';
+import '../../design_system/status_badge.dart';
+import '../../design_system/tokens.dart';
 import '../reports/report_sheet.dart';
 import 'map_controller.dart';
 import 'marker_icons.dart';
@@ -24,13 +26,19 @@ class ParkingPanel extends ConsumerWidget {
       minChildSize: 0.18,
       maxChildSize: 0.88,
       builder: (context, scroll) => Material(
-        elevation: 8,
+        elevation: 3,
         color: Theme.of(context).colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         clipBehavior: Clip.antiAlias,
         child: ListView(
           controller: scroll,
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+          // Edge-to-edge: keep content above the gesture/navigation bar.
+          padding: EdgeInsets.fromLTRB(
+            20,
+            8,
+            20,
+            28 + MediaQuery.viewPaddingOf(context).bottom,
+          ),
           children: [
             Center(
               child: Container(
@@ -110,15 +118,24 @@ class ParkingPanel extends ConsumerWidget {
                   ),
                 ],
               ),
-              Text(
-                '${distanceLabel(lot.distanceM)} · ${state.query.vehicle.label}',
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  _Compatibility(status: lot.compatibility),
+                  Text(
+                    '${distanceLabel(lot.distanceM)} · ${state.query.vehicle.label}',
+                    style: const TextStyle(fontFeatures: tabularFigures),
+                  ),
+                ],
               ),
+              const SizedBox(height: 12),
               _CommunityActions(
                 lot: lot,
                 zones: state.detail?.zones ?? lot.zones,
               ),
-              const SizedBox(height: 12),
-              _Compatibility(status: lot.compatibility),
               const SizedBox(height: 12),
               Text('停車場整體：${summaryLabel(lot.availabilitySummary)}'),
               Text(summaryFreshness(lot.availabilitySummary)),
@@ -216,26 +233,107 @@ class ParkingPanel extends ConsumerWidget {
   }
 }
 
+/// One result: space-type tile, name, status badge and availability on the
+/// left; distance as the scannable number on the right.
 class _LotRow extends StatelessWidget {
   const _LotRow({required this.lot, required this.onTap});
   final ParkingLot lot;
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(
-          lot.isUnverified ? Icons.help_outline : spaceIcon(markerSpace(lot)),
-        ),
-        title:
-            Text(lot.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Text(
-          '${markerDescription(lot)} · ${distanceLabel(lot.distanceM)}\n${summaryLabel(lot.availabilitySummary)} · ${summaryFreshness(lot.availabilitySummary)}',
-        ),
-        isThreeLine: true,
-        trailing: const Icon(Icons.chevron_right),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final unverified = lot.isUnverified;
+    final space = markerSpace(lot);
+    final distance = distanceLabel(lot.distanceM).split(' ');
+    return MergeSemantics(
+      child: InkWell(
         onTap: onTap,
-      );
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Shape carries the state too: filled tile = confirmed,
+              // outlined tile with "?" = unverified.
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: unverified ? null : scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                  border: unverified
+                      ? Border.all(color: scheme.outline, width: 1.5)
+                      : null,
+                ),
+                child: Icon(
+                  unverified ? Icons.help_outline : spaceIcon(space),
+                  color:
+                      unverified ? scheme.onSurface : scheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      lot.name,
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        StatusBadge(
+                          status: unverified
+                              ? CompatibilityStatus.unknown
+                              : CompatibilityStatus.allowed,
+                          label: unverified ? '尚未確認' : '可停放',
+                        ),
+                        Text(space.label, style: theme.textTheme.bodyMedium),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${summaryLabel(lot.availabilitySummary)} · ${summaryFreshness(lot.availabilitySummary)}',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontFeatures: tabularFigures,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    distance.first,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: tabularFigures,
+                    ),
+                  ),
+                  Text(
+                    distance.last,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _Legend extends StatelessWidget {
@@ -274,43 +372,16 @@ class _Compatibility extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final allowed = status == CompatibilityStatus.allowed;
-    final unknown = status == CompatibilityStatus.unknown;
     final label = entrance
         ? switch (status) {
             CompatibilityStatus.allowed => '入口可通行',
             CompatibilityStatus.notAllowed => '入口不可通行',
             CompatibilityStatus.unknown => '入口通行尚未確認',
           }
-        : unknown
+        : status == CompatibilityStatus.unknown
             ? '尚未確認'
             : status.label;
-    final color = allowed
-        ? Theme.of(context).colorScheme.primary
-        : Theme.of(context).colorScheme.error;
-    return Semantics(
-      label: label,
-      child: Row(
-        children: [
-          Icon(
-            allowed
-                ? Icons.verified_outlined
-                : unknown
-                    ? Icons.help_outline
-                    : Icons.block,
-            color: color,
-            size: 20,
-          ),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              label,
-              style: TextStyle(color: color, fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
+    return StatusBadge(status: status, label: label);
   }
 }
 

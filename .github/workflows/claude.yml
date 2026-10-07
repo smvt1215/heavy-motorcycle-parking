@@ -6,7 +6,8 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened, assigned]
+    # Assignment is not used to invoke Claude; mention @claude instead.
+    types: [opened]
   pull_request_review:
     types: [submitted]
 
@@ -18,10 +19,13 @@ jobs:
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
+    # Matches anthropics/claude-code-action examples/claude.yml so an @claude
+    # request can reply and push its changes to a branch. Only users with write
+    # access to this repository can trigger it.
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: write
+      pull-requests: write
+      issues: write
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:

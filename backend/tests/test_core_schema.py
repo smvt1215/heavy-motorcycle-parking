@@ -43,6 +43,7 @@ TABLES = {
     "favorites",
     "user_reports",
     "report_photos",
+    "access_tokens",
 }
 
 

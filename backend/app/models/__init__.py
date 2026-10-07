@@ -15,15 +15,17 @@ from app.models.enums import (
     ReportStatus,
     ReportType,
     RuleKind,
+    UserRole,
     VehicleType,
 )
 from app.models.ingestion import RawImportBatch, RawParkingRecord
 from app.models.parking import ParkingEntrance, ParkingFacility, ParkingLot, ParkingRule, ParkingZone
 from app.models.rate import ParkingRate, ParkingRateRule, ParkingRateSource
 from app.models.realtime import ParkingRealtime
-from app.models.user import Favorite, ReportPhoto, User, UserReport, UserVehicle
+from app.models.user import AccessToken, Favorite, ReportPhoto, User, UserReport, UserVehicle
 
 __all__ = [
+    "AccessToken",
     "Base",
     "DataSource",
     "DataSourceType",
@@ -53,6 +55,7 @@ __all__ = [
     "RuleKind",
     "User",
     "UserReport",
+    "UserRole",
     "UserVehicle",
     "VehicleType",
 ]

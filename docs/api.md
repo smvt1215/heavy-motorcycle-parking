@@ -13,10 +13,16 @@ Base path: `/api/v1`.
 - `GET /places/{place_id}`
 - `GET /parking/{id}/reports`
 - `POST /reports`
+- `POST /reports/{id}/photos`
+- `PATCH /reports/{id}/status` (moderator)
 - `GET /favorites`
 - `POST /favorites`
 - `DELETE /favorites/{parking_id}`
 - `GET /me`
+- `PUT /me/vehicle`
+- `GET /me/reports`
+- `POST /auth/logout`
+- `POST /auth/dev-session` (DEV environment only; not part of the stable contract)
 
 ## Authentication and authorization
 Public parking discovery endpoints are usable without authentication unless explicitly stated otherwise.
@@ -26,7 +32,11 @@ Protected user-scoped endpoints:
 - `GET /favorites`
 - `POST /favorites`
 - `DELETE /favorites/{parking_id}`
-- authenticated report ownership/history operations when introduced
+- `PUT /me/vehicle`, `GET /me/reports`, `POST /reports`, `POST /reports/{id}/photos`,
+  `PATCH /reports/{id}/status` (MODERATOR role) and `POST /auth/logout`
+
+M8 behavior, error codes and token storage are described in
+[user features](user-features.md).
 
 Clients authenticate with:
 

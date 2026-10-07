@@ -21,6 +21,7 @@
 - favorites
 - user_reports
 - report_photos
+- access_tokens (M8; SHA-256 token digests only)
 
 ## Spatial rules
 `parking_lots.location` and `parking_entrances.location` use `GEOGRAPHY(POINT,4326)` with GiST indexes.
@@ -147,7 +148,10 @@ Use `00:00` as the next-day endpoint of an overnight window.
 
 Source references use `RESTRICT` on deletion; raw records also prevent deletion
 of their import batch. Lot/zone/rate child facts cascade with their parent.
-Deleting a user removes vehicles and favorites but leaves report authorship NULL.
+Deleting a user removes vehicles, favorites and access tokens but leaves report
+authorship and moderation attribution NULL. Migration `004_user_features` aligns the
+report vocabulary with the v1 API and adds roles, preferred vehicle and access tokens;
+see [user features](user-features.md).
 Deleting an individual zone referenced by a report is blocked; deleting its lot
 cascades both zones and reports.
 

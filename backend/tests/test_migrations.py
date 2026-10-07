@@ -66,3 +66,59 @@ def test_alembic_check_ignores_visible_extension_schemas(monkeypatch):
         with engine.begin() as connection:
             connection.execute(text("DROP SCHEMA IF EXISTS m1_extension_fixture CASCADE"))
         engine.dispose()
+
+
+def test_m8_report_vocabulary_migration_maps_existing_rows():
+    """004 maps old report labels conservatively and back again on downgrade."""
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    engine = create_engine(settings.database_url)
+    try:
+        command.upgrade(cfg, "head")
+        command.downgrade(cfg, "003_ingestion_identity")
+        with engine.begin() as connection:
+            lot = connection.execute(
+                text(
+                    "INSERT INTO parking_lots (name, location) "
+                    "VALUES ('M8', 'SRID=4326;POINT(121.5 25.0)') RETURNING id"
+                )
+            ).scalar_one()
+            for report_type, status in (
+                ("RATE_CORRECTION", "ACCEPTED"),
+                ("CLOSURE", "UNDER_REVIEW"),
+                ("PERMISSION_CORRECTION", "REJECTED"),
+                ("OTHER", "PENDING"),
+            ):
+                connection.execute(
+                    text(
+                        "INSERT INTO user_reports (parking_id, report_type, status) "
+                        "VALUES (:lot, CAST(:t AS user_report_type), CAST(:s AS user_report_status))"
+                    ),
+                    {"lot": lot, "t": report_type, "s": status},
+                )
+        command.upgrade(cfg, "004_user_features")
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text("SELECT report_type::text, status::text FROM user_reports ORDER BY id")
+            ).all()
+        assert rows == [
+            ("WRONG_RATE", "VERIFIED"),
+            ("CLOSED", "PENDING"),
+            ("OTHER", "REJECTED"),
+            ("OTHER", "PENDING"),
+        ]
+        command.downgrade(cfg, "003_ingestion_identity")
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text("SELECT report_type::text, status::text FROM user_reports ORDER BY id")
+            ).all()
+        assert rows == [
+            ("RATE_CORRECTION", "ACCEPTED"),
+            ("CLOSURE", "PENDING"),
+            ("OTHER", "REJECTED"),
+            ("OTHER", "PENDING"),
+        ]
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM parking_lots WHERE id = :lot"), {"lot": lot})
+    finally:
+        command.upgrade(cfg, "head")
+        engine.dispose()

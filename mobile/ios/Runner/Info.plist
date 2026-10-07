@@ -4,6 +4,10 @@
 <dict>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>使用 App 期間取得位置，以搜尋附近可停放重機的停車場。</string>
+    <key>NSCameraUsageDescription</key>
+    <string>拍攝停車場照片，作為回報資料錯誤的佐證。</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>選擇停車場照片，作為回報資料錯誤的佐證。上傳時會移除拍攝位置等資訊。</string>
     <key>GoogleMapsAPIKey</key>
     <string>$(MAPS_API_KEY)</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>

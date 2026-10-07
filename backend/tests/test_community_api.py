@@ -380,6 +380,9 @@ async def test_photo_permissions_limits_and_validation(env):
 
     huge = await upload(env, report_id, b"\xff" * (settings.report_photo_max_bytes + 1))
     assert huge.status_code == 413 and huge.json()["error"]["code"] == "PHOTO_TOO_LARGE"
+    # Bodies far beyond the limit are refused before multipart parsing spools them.
+    oversized = await upload(env, report_id, b"\xff" * (settings.report_photo_max_bytes + 200_000))
+    assert oversized.status_code == 413 and oversized.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
 
     for _ in range(3):
         assert (await upload(env, report_id, jpeg_with_gps())).status_code == 201
@@ -428,8 +431,15 @@ async def test_dev_session_only_in_dev(env, monkeypatch):
     forged = await client.post("/api/v1/auth/dev-session", json={"subject": "x", "role": "MODERATOR"})
     assert forged.status_code == 422
 
+
+async def test_dev_session_route_does_not_exist_outside_dev(monkeypatch):
     monkeypatch.setattr(settings, "environment", "PROD")
-    assert (await client.post("/api/v1/auth/dev-session", json={"subject": "rider-2"})).status_code == 404
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
+        for body in ({"subject": "rider-2"}, {}, None):
+            response = await client.post("/api/v1/auth/dev-session", json=body)
+            assert response.status_code == 404
+    assert "/api/v1/auth/dev-session" not in app.openapi()["paths"]
 
 
 def test_openapi_marks_protected_operations_with_bearer_scheme():
@@ -446,3 +456,41 @@ def test_openapi_marks_protected_operations_with_bearer_scheme():
     assert schema["paths"]["/api/v1/reports/{report_id}/photos"]["post"]["security"] == [{"BearerAuth": []}]
     for public in ("/api/v1/parking/nearby", "/api/v1/parking/{parking_id}/reports", "/api/v1/places/autocomplete"):
         assert "security" not in schema["paths"][public]["get"]
+
+
+async def test_photo_upload_accepts_heic_and_reencodes_jpeg(env):
+    report_id = (await create_report(env)).json()["id"]
+    buffer = io.BytesIO()
+    Image.new("RGB", (40, 30), (10, 120, 200)).save(buffer, format="HEIF")
+    response = await upload(env, report_id, buffer.getvalue(), filename="IMG_0001.HEIC")
+    assert response.status_code == 201
+    assert (response.json()["content_type"], response.json()["width"]) == ("image/jpeg", 40)
+    (stored, _), *_ = env["app"].state.object_storage.objects.values()
+    assert stored[:3] == b"\xff\xd8\xff"
+
+
+async def test_report_lists_are_keyset_paged_and_filterable(env):
+    client, lot = env["client"], env["lots"][0]
+    ids = [(await create_report(env, report_type="OTHER")).json()["id"] for _ in range(5)]
+    await client.patch(f"/api/v1/reports/{ids[0]}/status", json={"status": "VERIFIED"}, headers=auth(env, "mod"))
+
+    seen, before = [], None
+    while True:
+        params = {"limit": 2, **({"before": before} if before else {})}
+        body = (await client.get(f"/api/v1/parking/{lot.id}/reports", params=params)).json()
+        seen += [item["id"] for item in body["items"]]
+        if not body["page"]["has_more"]:
+            assert body["page"]["next_before"] is None
+            break
+        before = body["page"]["next_before"]
+    assert seen == sorted(ids, reverse=True)
+
+    # Older verified evidence stays reachable even behind newer pending reports.
+    verified = (await client.get(f"/api/v1/parking/{lot.id}/reports", params={"status": "VERIFIED", "limit": 1})).json()
+    assert [item["id"] for item in verified["items"]] == [ids[0]]
+
+    mine = (await client.get("/api/v1/me/reports", params={"limit": 3}, headers=auth(env, "alice"))).json()
+    assert len(mine["items"]) == 3 and mine["page"]["has_more"] is True
+    for bad in ({"limit": 0}, {"limit": 101}, {"before": 0}, {"user_id": 1}):
+        response = await client.get("/api/v1/me/reports", params=bad, headers=auth(env, "alice"))
+        assert response.status_code == 422

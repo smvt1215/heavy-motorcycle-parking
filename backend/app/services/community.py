@@ -16,11 +16,10 @@ from app.auth.tokens import AuthenticatedUser
 from app.domain.errors import DiscoveryError, forbidden, not_found, unauthenticated
 from app.models import ReportPhoto, ReportStatus, ReportType, UserReport, VehicleType
 from app.repositories.community import ReportRepository, UserRepository
-from app.services.photos import process_photo
+from app.services.photos import process_photo_async
 from app.services.storage import ObjectStorage, storage_unavailable
 
 MAX_PHOTOS_PER_REPORT = 3
-LIST_LIMIT = 50
 RESOLVED_STATUSES = {ReportStatus.VERIFIED, ReportStatus.REJECTED, ReportStatus.SUPERSEDED}
 
 
@@ -36,6 +35,12 @@ def report_not_found() -> DiscoveryError:
 class ReportView:
     report: UserReport
     photo_count: int
+
+
+@dataclass(frozen=True)
+class ReportPage:
+    views: list[ReportView]
+    next_before: int | None
 
 
 class ProfileService:
@@ -105,13 +110,20 @@ class ReportService:
         await self.session.commit()
         return ReportView(report, 0)
 
-    async def for_parking(self, parking_id: int) -> list[ReportView]:
+    async def for_parking(
+        self, parking_id: int, limit: int, before_id: int | None, status: ReportStatus | None
+    ) -> ReportPage:
         if not await self.users.lot_exists(parking_id):
             raise parking_not_found()
-        return await self._views(await self.reports.for_parking(parking_id, LIST_LIMIT))
+        return await self._page(await self.reports.for_parking(parking_id, limit, before_id, status), limit)
 
-    async def mine(self, principal: AuthenticatedUser) -> list[ReportView]:
-        return await self._views(await self.reports.for_user(principal.id, LIST_LIMIT))
+    async def mine(self, principal: AuthenticatedUser, limit: int, before_id: int | None) -> ReportPage:
+        return await self._page(await self.reports.for_user(principal.id, limit, before_id), limit)
+
+    async def _page(self, rows: list[UserReport], limit: int) -> ReportPage:
+        page = rows[:limit]
+        next_before = page[-1].id if len(rows) > limit else None
+        return ReportPage(await self._views(page), next_before)
 
     async def add_photo(self, principal: AuthenticatedUser, report_id: int, data: bytes) -> ReportPhoto:
         report = await self.reports.get(report_id, for_update=True)
@@ -128,7 +140,7 @@ class ReportService:
             )
         if self.storage is None:
             raise storage_unavailable()
-        photo = process_photo(data, self.max_photo_bytes)
+        photo = await process_photo_async(data, self.max_photo_bytes)
         key = f"reports/{report.id}/{uuid.uuid4().hex}.jpg"
         await self.storage.put(key, photo.body, photo.content_type)
         try:

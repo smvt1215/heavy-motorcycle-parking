@@ -204,8 +204,11 @@ class MapController extends StateNotifier<MapState> {
   Future<void> focus(GeoPoint center) {
     if (!center.isValid) throw ArgumentError.value(center, 'center');
     _cameraCenter = center;
+    // A favorite replaces any destination search: the marker and name of an
+    // older destination would misdescribe the new search center.
     state = state.copyWith(
       cameraRequest: CameraRequest(center, ++_cameraSerial),
+      destination: null,
     );
     return _runSearch(
       state.query.copyWith(center: center),

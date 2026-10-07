@@ -6,7 +6,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Favorite, ParkingLot, ParkingZone, ReportPhoto, User, UserReport
+from app.models import Favorite, ParkingLot, ParkingZone, ReportPhoto, ReportStatus, User, UserReport
 from app.repositories.parking import coordinates
 
 
@@ -71,29 +71,23 @@ class ReportRepository:
             statement = statement.with_for_update()
         return (await self.session.scalars(statement)).one_or_none()
 
-    async def for_parking(self, parking_id: int, limit: int) -> list[UserReport]:
-        return list(
-            (
-                await self.session.scalars(
-                    select(UserReport)
-                    .where(UserReport.parking_id == parking_id)
-                    .order_by(UserReport.created_at.desc(), UserReport.id.desc())
-                    .limit(limit)
-                )
-            ).all()
-        )
+    async def for_parking(
+        self, parking_id: int, limit: int, before_id: int | None, status: ReportStatus | None
+    ) -> list[UserReport]:
+        """Newest first by ID; returns up to `limit + 1` rows so callers can detect more."""
+        statement = select(UserReport).where(UserReport.parking_id == parking_id)
+        if status is not None:
+            statement = statement.where(UserReport.status == status)
+        return await self._page(statement, limit, before_id)
 
-    async def for_user(self, user_id: int, limit: int) -> list[UserReport]:
-        return list(
-            (
-                await self.session.scalars(
-                    select(UserReport)
-                    .where(UserReport.user_id == user_id)
-                    .order_by(UserReport.created_at.desc(), UserReport.id.desc())
-                    .limit(limit)
-                )
-            ).all()
-        )
+    async def for_user(self, user_id: int, limit: int, before_id: int | None) -> list[UserReport]:
+        return await self._page(select(UserReport).where(UserReport.user_id == user_id), limit, before_id)
+
+    async def _page(self, statement, limit: int, before_id: int | None) -> list[UserReport]:
+        if before_id is not None:
+            statement = statement.where(UserReport.id < before_id)
+        statement = statement.order_by(UserReport.id.desc()).limit(limit + 1)
+        return list((await self.session.scalars(statement)).all())
 
     async def photo_counts(self, report_ids: Iterable[int]) -> dict[int, int]:
         ids = list(report_ids)

@@ -76,6 +76,7 @@ class AuthController extends StateNotifier<AuthState> {
   final UserRepository _repository;
   final TokenStore _store;
   String? _token;
+  int _vehicleGeneration = 0;
 
   Future<void> restore() async {
     final token = await _readToken();
@@ -113,11 +114,21 @@ class AuthController extends StateNotifier<AuthState> {
     }
   }
 
+  /// Only the latest request for the still-active token may update the
+  /// profile; out-of-order or previous-session responses are dropped.
   Future<void> setVehicle(VehicleType? vehicle) async {
+    final generation = ++_vehicleGeneration;
+    final token = _token;
     final profile = await authorized((token) {
       return _repository.setVehicle(token, vehicle);
     });
-    if (mounted) state = state.copyWith(profile: profile);
+    if (!mounted ||
+        generation != _vehicleGeneration ||
+        token == null ||
+        !identical(token, _token)) {
+      return;
+    }
+    state = state.copyWith(profile: profile);
   }
 
   /// Runs [call] with the current token. Throws `UNAUTHENTICATED` for guests and

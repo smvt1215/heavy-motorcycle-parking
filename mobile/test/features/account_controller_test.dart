@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:heavy_parking/data/user_repository.dart';
 import 'package:heavy_parking/domain/parking.dart';
+import 'package:heavy_parking/domain/user.dart';
 import 'package:heavy_parking/features/account/account_controller.dart';
 
 import '../fixtures/user.dart';
@@ -118,6 +121,52 @@ void main() {
     );
   });
 
+  test('stale vehicle responses never overwrite the latest choice', () async {
+    store.token = validToken;
+    final slow = _ControlledVehicleRepository();
+    final c = ProviderContainer(
+      overrides: [
+        userRepositoryProvider.overrideWithValue(slow),
+        tokenStoreProvider.overrideWithValue(store),
+      ],
+    );
+    addTearDown(c.dispose);
+    c.read(authControllerProvider);
+    await settle();
+    final auth = c.read(authControllerProvider.notifier);
+    final first = auth.setVehicle(VehicleType.yellow);
+    final second = auth.setVehicle(VehicleType.red);
+    slow.complete(1, VehicleType.red);
+    await second;
+    slow.complete(0, VehicleType.yellow);
+    await first;
+    expect(
+      c.read(authControllerProvider).profile!.preferredVehicle,
+      VehicleType.red,
+    );
+  });
+
+  test('a response from a signed-out session is discarded', () async {
+    store.token = validToken;
+    final slow = _ControlledVehicleRepository();
+    final c = ProviderContainer(
+      overrides: [
+        userRepositoryProvider.overrideWithValue(slow),
+        tokenStoreProvider.overrideWithValue(store),
+      ],
+    );
+    addTearDown(c.dispose);
+    c.read(authControllerProvider);
+    await settle();
+    final auth = c.read(authControllerProvider.notifier);
+    final pending = auth.setVehicle(VehicleType.yellow);
+    await auth.signOut();
+    await auth.devSignIn('bob');
+    slow.complete(0, VehicleType.yellow);
+    await pending;
+    expect(c.read(authControllerProvider).profile!.preferredVehicle, isNull);
+  });
+
   group('favorites', () {
     test('create, list and remove follow the signed-in user', () async {
       store.token = validToken;
@@ -192,5 +241,20 @@ class _OfflineRepository extends FakeUserRepository {
   Future<Never> me(String token) async => throw const UserApiException(
         code: UserApiException.network,
         message: 'offline',
+      );
+}
+
+class _ControlledVehicleRepository extends FakeUserRepository {
+  final _pending = <Completer<UserProfile>>[];
+
+  @override
+  Future<UserProfile> setVehicle(String token, VehicleType? vehicle) {
+    final completer = Completer<UserProfile>();
+    _pending.add(completer);
+    return completer.future;
+  }
+
+  void complete(int index, VehicleType vehicle) => _pending[index].complete(
+        UserProfile(id: 7, role: 'USER', preferredVehicle: vehicle),
       );
 }

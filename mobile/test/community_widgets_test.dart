@@ -14,11 +14,21 @@ import 'map_screen_test.dart' show WidgetRepository;
 
 class _Picker implements PhotoPicker {
   int calls = 0;
+  PhotoPickFailure? failure;
+  PickedPhoto? lost;
 
   @override
   Future<PickedPhoto?> pick({required bool camera}) async {
     calls++;
+    if (failure case final failure?) throw failure;
     return PickedPhoto(Uint8List.fromList([1, 2, 3]), 'entrance.jpg');
+  }
+
+  @override
+  Future<PickedPhoto?> recoverLost() async {
+    final photo = lost;
+    lost = null;
+    return photo;
   }
 }
 
@@ -136,5 +146,35 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.token, isNull);
     expect(find.text('開發者登入'), findsOneWidget);
+  });
+
+  testWidgets('picker failures are shown instead of crashing the sheet',
+      (tester) async {
+    store.token = validToken;
+    picker.failure = const PhotoPickFailure('相機權限已關閉，請至系統設定開啟。');
+    await pumpMap(tester);
+    await selectFirstLot(tester);
+    await tester.tap(find.text('回報問題'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('拍照'));
+    await tester.pumpAndSettle();
+    expect(find.text('相機權限已關閉，請至系統設定開啟。'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    expect(find.text('可附一張照片佐證（選填）'), findsOneWidget);
+  });
+
+  testWidgets('a photo lost to Android activity recreation is recovered',
+      (tester) async {
+    store.token = validToken;
+    picker.lost = PickedPhoto(Uint8List.fromList([9]), 'recovered.jpg');
+    await pumpMap(tester);
+    expect(find.textContaining('已找回先前選擇的照片'), findsOneWidget);
+    await selectFirstLot(tester);
+    await tester.tap(find.text('回報問題'));
+    await tester.pumpAndSettle();
+    expect(find.text('已選擇照片：recovered.jpg'), findsOneWidget);
+    await tester.tap(find.text('送出回報'));
+    await tester.pumpAndSettle();
+    expect(users.photos.single.$2, 'recovered.jpg');
   });
 }

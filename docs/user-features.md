@@ -20,8 +20,9 @@ public parking, search and detail feature.
 - Apple/Google/email sign-in is not implemented yet. Their future job is to end by
   issuing one of these tokens. Until then:
   - `POST /api/v1/auth/dev-session {"subject": "..."}` issues a token for subject
-    `dev:<subject>` **only when `ENVIRONMENT=DEV`** (404 elsewhere, hidden from
-    OpenAPI). It can never assign a role.
+    `dev:<subject>`. The route is **registered only when `ENVIRONMENT=DEV`**, so
+    elsewhere every request (even a malformed one) gets 404 and it is absent from
+    OpenAPI. It can never assign a role.
   - Operators can use `python -m app.auth.cli issue --subject <s> [--role MODERATOR]`
     and `python -m app.auth.cli revoke-user --subject <s>`.
 - `POST /api/v1/auth/logout` revokes the current token.
@@ -55,6 +56,10 @@ GATE_SENSOR_FAILED, OTHER.
 - `GET /parking/{id}/reports` is public. It never exposes the author, and free text
   is shown only after the report is VERIFIED. `GET /me/reports` returns the rider's
   own reports with their text.
+- Both lists are keyset-paged newest first: `limit` (1–100, default 20) and
+  `before=<report id>`; responses include `page.next_before` and `page.has_more`.
+  The public list also accepts `status`, so older VERIFIED evidence stays reachable
+  behind newer pending reports.
 - Promoting verified evidence into normalized facts is a future, separately
   attributed workflow.
 
@@ -63,9 +68,14 @@ GATE_SENSOR_FAILED, OTHER.
 `POST /reports/{id}/photos` (multipart `file`, owner only, pending reports only, at
 most 3 per report, `REPORT_PHOTO_MAX_BYTES` default 5 MB):
 
-- Pillow decodes JPEG/PNG/WebP only, rejects oversized pixel counts, applies EXIF
-  orientation, resizes to ≤2048 px and re-encodes JPEG **without metadata**, so
-  phone GPS coordinates are not stored.
+- An ASGI guard rejects photo request bodies larger than the limit + 64 KB with 413
+  `PAYLOAD_TOO_LARGE` **before** multipart parsing spools them (declared
+  Content-Length is refused unread; streamed bodies stop at the limit).
+- Pillow decodes JPEG/PNG/WebP and HEIC/HEIF (pillow-heif, for Android galleries that
+  return HEIC), rejects oversized pixel counts, applies EXIF orientation, resizes to
+  ≤2048 px and re-encodes JPEG **without metadata**, so phone GPS coordinates are not
+  stored. Decoding runs in a worker thread, at most two at a time per process, so
+  large uploads do not stall the event loop.
 - The object goes to S3-compatible storage at `reports/<report_id>/<uuid>.jpg`
   (server-side encryption requested). `report_photos` stores the key, content type,
   byte size and dimensions, never credentials. If the database write fails the
@@ -88,7 +98,15 @@ most 3 per report, `REPORT_PHOTO_MAX_BYTES` default 5 MB):
   The report sheet explains that reports are reviewed and do not change official
   data. Photos come from `image_picker` with JPEG output; if the photo upload fails,
   the saved report is kept and the rider is told.
-- iOS declares camera and photo-library usage descriptions.
+- iOS declares camera and photo-library usage descriptions, and the Runner has a
+  `keychain-access-groups` entitlement (empty array, default group) as
+  `flutter_secure_storage` requires.
+- Picker permission/platform failures show a message in the report sheet. On
+  Android, a photo delivered after the activity was recreated is recovered at
+  launch (`retrieveLostData`) and offered to the next report.
+- Vehicle-preference responses are applied only if they are the latest request for
+  the still-active token, so rapid changes or a sign-out cannot restore a stale value.
+- Opening a favorite clears any active destination search and its marker.
 
 ## Database (migration 004)
 

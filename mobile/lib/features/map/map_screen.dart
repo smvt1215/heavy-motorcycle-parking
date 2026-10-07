@@ -6,6 +6,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../data/location_service.dart';
 import '../../data/map_configuration.dart';
+import '../../data/photo_picker.dart';
 import '../../domain/parking.dart';
 import '../../domain/place.dart';
 import '../account/account_controller.dart';
@@ -72,6 +73,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         }),
       );
     }
+    unawaited(_recoverLostPhoto());
     if (widget.autoSearch) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !ref.read(mapControllerProvider).hasSearched) {
@@ -132,6 +134,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _recoverLostPhoto() async {
+    final photo = await ref.read(photoPickerProvider).recoverLost();
+    if (photo == null || !mounted) return;
+    ref.read(recoveredPhotoProvider.notifier).state = photo;
+    _message('已找回先前選擇的照片，開啟停車場的「回報問題」即可繼續。');
   }
 
   void _moveTo(CameraRequest? previous, CameraRequest? next) {

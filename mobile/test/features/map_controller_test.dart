@@ -153,6 +153,20 @@ void main() {
     expect(state().query.center, taipei101.location);
   });
 
+  test('focusing a favorite replaces an active destination', () async {
+    final destination = controller.searchDestination(taipei101);
+    repo.nearbyCalls.last.completer.complete(_page());
+    await destination;
+    expect(state().destination, isNotNull);
+
+    final focus = controller.focus(const GeoPoint(25.05, 121.55));
+    expect(state().destination, isNull);
+    expect(state().cameraRequest!.target, const GeoPoint(25.05, 121.55));
+    expect(repo.nearbyCalls.last.query.center, const GeoPoint(25.05, 121.55));
+    repo.nearbyCalls.last.completer.complete(_page());
+    await focus;
+  });
+
   test('a later area search keeps the destination marker', () async {
     final first = controller.searchDestination(taipei101);
     repo.nearbyCalls.last.completer.complete(_page());

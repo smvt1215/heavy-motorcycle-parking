@@ -23,6 +23,21 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
   PickedPhoto? _photo;
   final _description = TextEditingController();
 
+  String? _pickError;
+
+  @override
+  void initState() {
+    super.initState();
+    final recovered = ref.read(recoveredPhotoProvider);
+    if (recovered != null) {
+      _photo = recovered;
+      // Consume it once; it belongs to this new report draft now.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => ref.read(recoveredPhotoProvider.notifier).state = null,
+      );
+    }
+  }
+
   @override
   void dispose() {
     _description.dispose();
@@ -30,8 +45,13 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
   }
 
   Future<void> _pick(bool camera) async {
-    final photo = await ref.read(photoPickerProvider).pick(camera: camera);
-    if (photo != null && mounted) setState(() => _photo = photo);
+    setState(() => _pickError = null);
+    try {
+      final photo = await ref.read(photoPickerProvider).pick(camera: camera);
+      if (photo != null && mounted) setState(() => _photo = photo);
+    } on PhotoPickFailure catch (e) {
+      if (mounted) setState(() => _pickError = e.message);
+    }
   }
 
   @override
@@ -128,6 +148,11 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
               ],
             ),
             const Text('照片上傳時會移除拍攝位置等中繼資料。'),
+            if (_pickError case final message?)
+              Text(
+                message,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             if (state.error case final error?) ...[
               const SizedBox(height: 8),
               Text(

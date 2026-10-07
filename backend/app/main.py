@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 from app.cache import get_redis
 from app.config import settings
 from app.domain.errors import DiscoveryError
+from app.middleware import RequestBodyLimit
+from app.routers.community import dev_router
 from app.routers.community import router as community_router
 from app.routers.health import router as health_router
 from app.routers.parking import router as parking_router
@@ -88,6 +90,14 @@ def create_app() -> FastAPI:
     app.include_router(parking_router, prefix="/api/v1")
     app.include_router(places_router, prefix="/api/v1")
     app.include_router(community_router, prefix="/api/v1")
+    if settings.environment == "DEV":
+        app.include_router(dev_router, prefix="/api/v1")
+    # Multipart bodies are spooled before handlers run; cap them at the ASGI boundary.
+    app.add_middleware(
+        RequestBodyLimit,
+        max_bytes=settings.report_photo_max_bytes + 64 * 1024,
+        path_pattern=r"/api/v1/reports/[0-9]+/photos",
+    )
     return app
 
 

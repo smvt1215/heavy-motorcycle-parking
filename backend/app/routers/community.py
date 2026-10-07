@@ -1,14 +1,13 @@
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Path, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Path, Query, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import CurrentUser
 from app.auth.tokens import AccessTokenService
 from app.config import settings
 from app.db import get_session
-from app.domain.errors import not_found
 from app.schemas.community import (
     DevSessionRequest,
     FavoriteCreate,
@@ -19,17 +18,22 @@ from app.schemas.community import (
     OwnReportsResponse,
     PhotoResponse,
     PublicReport,
+    PublicReportListQuery,
     PublicReportsResponse,
     ReportCreate,
+    ReportListQuery,
+    ReportPageInfo,
     ReportStatusUpdate,
     SessionResponse,
     VehiclePreference,
 )
 from app.schemas.error import ErrorResponse
 from app.schemas.parking import Location
-from app.services.community import ProfileService, ReportService, ReportView
+from app.services.community import ProfileService, ReportPage, ReportService, ReportView
 
 router = APIRouter()
+# Registered by create_app only when ENVIRONMENT=DEV, so it does not exist elsewhere.
+dev_router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
 ParkingID = Annotated[int, Path(gt=0)]
 ReportID = Annotated[int, Path(gt=0)]
@@ -74,6 +78,10 @@ def _public(view: ReportView) -> PublicReport:
     )
 
 
+def _page_info(page: ReportPage) -> ReportPageInfo:
+    return ReportPageInfo(next_before=page.next_before, has_more=page.next_before is not None)
+
+
 def _own(view: ReportView) -> OwnReport:
     return OwnReport(**{**_public(view).model_dump(), "description": view.report.description})
 
@@ -81,17 +89,9 @@ def _own(view: ReportView) -> OwnReport:
 # --- session -----------------------------------------------------------------------------
 
 
-@router.post(
-    "/auth/dev-session",
-    response_model=SessionResponse,
-    tags=["auth"],
-    include_in_schema=settings.environment == "DEV",
-    responses={404: {"model": ErrorResponse}},
-)
+@dev_router.post("/auth/dev-session", response_model=SessionResponse, tags=["auth"])
 async def dev_session(request: Request, body: DevSessionRequest, session: Session):
-    """DEV only: issue a token for a local test subject. Disabled (404) elsewhere."""
-    if settings.environment != "DEV":
-        raise not_found("NOT_FOUND", "Not found.")
+    """DEV only: issue a token for a local test subject. Not registered elsewhere."""
     tokens = AccessTokenService(session)
     user = await tokens.ensure_user(f"dev:{body.subject}", display_name=body.display_name)
     token, expires_at = await tokens.issue(
@@ -122,8 +122,9 @@ async def set_vehicle(body: VehiclePreference, user: CurrentUser, profiles: Prof
 
 
 @router.get("/me/reports", response_model=OwnReportsResponse, tags=["reports"], responses=AUTH)
-async def my_reports(user: CurrentUser, reports: Reports):
-    return OwnReportsResponse(items=[_own(view) for view in await reports.mine(user)])
+async def my_reports(user: CurrentUser, reports: Reports, query: Annotated[ReportListQuery, Query()]):
+    page = await reports.mine(user, query.limit, query.before)
+    return OwnReportsResponse(items=[_own(view) for view in page.views], page=_page_info(page))
 
 
 @router.get("/favorites", response_model=FavoritesResponse, tags=["favorites"], responses=AUTH)
@@ -175,8 +176,9 @@ async def remove_favorite(parking_id: ParkingID, user: CurrentUser, profiles: Pr
     tags=["reports"],
     responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
 )
-async def parking_reports(parking_id: ParkingID, reports: Reports):
-    return PublicReportsResponse(items=[_public(view) for view in await reports.for_parking(parking_id)])
+async def parking_reports(parking_id: ParkingID, reports: Reports, query: Annotated[PublicReportListQuery, Query()]):
+    page = await reports.for_parking(parking_id, query.limit, query.before, query.status)
+    return PublicReportsResponse(items=[_public(view) for view in page.views], page=_page_info(page))
 
 
 @router.post(

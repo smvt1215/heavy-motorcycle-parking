@@ -75,8 +75,25 @@ class PublicReport(WireModel):
     provenance: ReportProvenance = ReportProvenance()
 
 
+class ReportPageInfo(WireModel):
+    """Keyset page: pass `next_before` as `before` to get older reports."""
+
+    next_before: int | None
+    has_more: bool
+
+
+class ReportListQuery(WireModel):
+    limit: int = Field(default=20, ge=1, le=100)
+    before: int | None = Field(default=None, gt=0)
+
+
+class PublicReportListQuery(ReportListQuery):
+    status: ReportStatus | None = None
+
+
 class PublicReportsResponse(WireModel):
     items: list[PublicReport]
+    page: ReportPageInfo
 
 
 class OwnReport(PublicReport):
@@ -85,6 +102,7 @@ class OwnReport(PublicReport):
 
 class OwnReportsResponse(WireModel):
     items: list[OwnReport]
+    page: ReportPageInfo
 
 
 class PhotoResponse(WireModel):

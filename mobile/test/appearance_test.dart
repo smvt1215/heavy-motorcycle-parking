@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -108,6 +109,69 @@ void main() {
     );
   });
 
+  testWidgets('system bar icons follow a forced theme, not the OS',
+      (tester) async {
+    store.mode = ThemeMode.dark;
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+    addTearDown(tester.platformDispatcher.clearAllTestValues);
+    await pumpApp(tester);
+    final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+      find.byType(AnnotatedRegion<SystemUiOverlayStyle>).first,
+    );
+    // Dark app over a light OS: light icons on transparent bars.
+    expect(region.value.statusBarIconBrightness, Brightness.light);
+    expect(region.value.statusBarColor, Colors.transparent);
+    expect(
+      systemBarStyle(Brightness.light).statusBarIconBrightness,
+      Brightness.dark,
+    );
+  });
+
+  testWidgets('a preloaded choice is used on the very first frame',
+      (tester) async {
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+    addTearDown(tester.platformDispatcher.clearAllTestValues);
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (_, __) => MapScreen(
+            mapBuilder: (_, value) {
+              config = value;
+              return const SizedBox.expand();
+            },
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appearanceStoreProvider.overrideWithValue(store),
+          initialThemeModeProvider.overrideWithValue(ThemeMode.dark),
+          mapControllerProvider
+              .overrideWith((ref) => MapController(WidgetRepository())),
+          userRepositoryProvider.overrideWithValue(FakeUserRepository()),
+          tokenStoreProvider.overrideWithValue(MemoryTokenStore()),
+        ],
+        child: HeavyParkingApp(router: router),
+      ),
+    );
+    // No pump/settle: the first built frame must already be dark.
+    expect(config!.style, darkMapStyle);
+    await tester.pumpAndSettle();
+  });
+
+  test('startup preference read never blocks launch for long', () async {
+    expect(
+      await loadInitialThemeMode(MemoryAppearanceStore(ThemeMode.light)),
+      ThemeMode.light,
+    );
+    expect(await loadInitialThemeMode(_FailingStore()), isNull);
+    expect(await loadInitialThemeMode(_SlowStore()), isNull);
+  });
+
   testWidgets('Increase Contrast selects the high-contrast scheme',
       (tester) async {
     tester.platformDispatcher.accessibilityFeaturesTestValue =
@@ -180,4 +244,21 @@ void main() {
       expect(await blurred(tester, platform: TargetPlatform.android), isFalse);
     });
   });
+}
+
+class _FailingStore implements AppearanceStore {
+  @override
+  Future<ThemeMode?> load() async => throw StateError('no platform');
+
+  @override
+  Future<void> save(ThemeMode mode) async {}
+}
+
+class _SlowStore implements AppearanceStore {
+  @override
+  Future<ThemeMode?> load() =>
+      Future.delayed(const Duration(seconds: 5), () => ThemeMode.dark);
+
+  @override
+  Future<void> save(ThemeMode mode) async {}
 }

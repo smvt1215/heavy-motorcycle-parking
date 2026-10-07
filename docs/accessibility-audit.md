@@ -3,7 +3,10 @@
 Flow audited: open map → choose YELLOW/RED → filter → search destination
 (`台北101`) → open parking detail → favorite / report → external navigation.
 "Automated" items run in `mobile/test/accessibility_test.dart` and
-`mobile/test/appearance_test.dart` on every CI run. "Device" items need a manual
+`mobile/test/appearance_test.dart` on every CI run. Audit tests run once per
+platform (`TargetPlatformVariant` iOS + Android), so the Cupertino plate selector,
+round locate button and translucent surfaces are checked as well as the Material
+controls. "Device" items need a manual
 check on real hardware before release (record date, device and OS version).
 
 ## Shared
@@ -13,6 +16,8 @@ check on real hardware before release (record date, device and OS version).
 | Parking state is never color alone | Status badges pair text with an icon and shape (filled check = 可停放, outlined ? = 尚未確認, outlined block = 不可停); result tiles are filled vs outlined; map markers keep M5 shapes | Automated (badge text + icon), M5 marker tests |
 | System / Light / Dark | `外觀` setting (跟隨系統 / 淺色 / 深色), persisted on device | Automated |
 | Map style follows theme | Dark/light map style comes from the effective theme, including a forced choice | Automated |
+| No appearance flash at launch | The saved choice is read before `runApp` (300 ms cap) so the first frame and map style already use it | Automated |
+| System-bar icons readable | `AnnotatedRegion<SystemUiOverlayStyle>` follows the app theme, so a forced Dark/Light choice flips status/navigation icons too | Automated; Device |
 | Tap targets | Theme minimums are 48dp (≥44pt), `MaterialTapTargetSize.padded`; Flutter `androidTapTargetGuideline` + `iOSTapTargetGuideline` | Automated: map, detail, account, search, report sheet, light/dark/high contrast |
 | Labeled controls | `labeledTapTargetGuideline`; icon buttons have tooltips; search/plate/status widgets expose semantic labels | Automated |
 | Text contrast | `textContrastGuideline` (WCAG AA) in light, dark and high-contrast dark | Automated |

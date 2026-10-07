@@ -33,13 +33,34 @@ class SharedPreferencesAppearanceStore implements AppearanceStore {
 final appearanceStoreProvider =
     Provider<AppearanceStore>((ref) => SharedPreferencesAppearanceStore());
 
+/// Saved choice read before `runApp`, so the first frame (and map style)
+/// already uses it instead of flashing the OS appearance.
+final initialThemeModeProvider = Provider<ThemeMode?>((ref) => null);
+
 final appearanceControllerProvider =
-    StateNotifierProvider<AppearanceController, ThemeMode>(
-  (ref) => AppearanceController(ref.watch(appearanceStoreProvider))..restore(),
-);
+    StateNotifierProvider<AppearanceController, ThemeMode>((ref) {
+  final initial = ref.watch(initialThemeModeProvider);
+  final controller = AppearanceController(
+    ref.watch(appearanceStoreProvider),
+    initial: initial ?? ThemeMode.system,
+  );
+  // Without a preloaded value (e.g. tests), fall back to an async restore.
+  if (initial == null) controller.restore();
+  return controller;
+});
+
+/// Reads the saved mode for startup; never blocks launch for long.
+Future<ThemeMode?> loadInitialThemeMode(AppearanceStore store) async {
+  try {
+    return await store.load().timeout(const Duration(milliseconds: 300));
+  } catch (_) {
+    return null;
+  }
+}
 
 class AppearanceController extends StateNotifier<ThemeMode> {
-  AppearanceController(this._store) : super(ThemeMode.system);
+  AppearanceController(this._store, {ThemeMode initial = ThemeMode.system})
+      : super(initial);
 
   final AppearanceStore _store;
   bool _changed = false;

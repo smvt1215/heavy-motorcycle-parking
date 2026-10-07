@@ -1,6 +1,7 @@
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -38,8 +39,25 @@ class HeavyParkingApp extends ConsumerWidget {
               buildTheme(schemes.highContrastDark, highContrast: true),
           routerConfig: router ?? appRouter,
           debugShowCheckedModeBanner: false,
+          // System-bar icons follow the *app* theme, including a forced
+          // Light/Dark choice that differs from the OS appearance.
+          builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+            value: systemBarStyle(Theme.of(context).brightness),
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
     );
   }
+}
+
+/// Transparent edge-to-edge bars with icons that contrast with [brightness].
+SystemUiOverlayStyle systemBarStyle(Brightness brightness) {
+  final base = brightness == Brightness.dark
+      ? SystemUiOverlayStyle.light
+      : SystemUiOverlayStyle.dark;
+  return base.copyWith(
+    statusBarColor: Colors.transparent,
+    systemNavigationBarColor: Colors.transparent,
+  );
 }

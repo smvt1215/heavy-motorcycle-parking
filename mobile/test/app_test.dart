@@ -28,6 +28,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('重機停車通'), findsOneWidget);
+    // Search-first header: the destination field leads the map.
+    expect(find.text('搜尋目的地'), findsOneWidget);
+    expect(find.byTooltip('我的帳號'), findsOneWidget);
   });
 }

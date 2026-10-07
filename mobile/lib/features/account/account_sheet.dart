@@ -6,6 +6,7 @@ import '../../domain/parking.dart';
 import '../../domain/user.dart';
 import '../map/map_controller.dart';
 import '../reports/report_controller.dart';
+import '../settings/appearance_controller.dart';
 import 'account_controller.dart';
 
 /// Account, preferred vehicle and saved parking. Guests can keep using all
@@ -35,6 +36,8 @@ class AccountSheet extends ConsumerWidget {
               _GuestSection(auth: auth)
             else
               _SignedInSection(profile: auth.profile!),
+            const Divider(height: 32),
+            const _AppearanceSection(),
           ],
         ),
       ),
@@ -174,6 +177,44 @@ class _SignedInSection extends ConsumerWidget {
                       .toggle(favorite.parkingId),
             ),
           ),
+      ],
+    );
+  }
+}
+
+/// System / Light / Dark. The map style follows the resulting theme.
+class _AppearanceSection extends ConsumerWidget {
+  const _AppearanceSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(appearanceControllerProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('外觀', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        SegmentedButton<ThemeMode>(
+          showSelectedIcon: false,
+          segments: [
+            for (final value in ThemeMode.values)
+              ButtonSegment(
+                value: value,
+                label: Text(value.label),
+                icon: Icon(
+                  switch (value) {
+                    ThemeMode.system => Icons.brightness_auto_outlined,
+                    ThemeMode.light => Icons.light_mode_outlined,
+                    ThemeMode.dark => Icons.dark_mode_outlined,
+                  },
+                ),
+              ),
+          ],
+          selected: {mode},
+          onSelectionChanged: (selection) => ref
+              .read(appearanceControllerProvider.notifier)
+              .set(selection.single),
+        ),
       ],
     );
   }

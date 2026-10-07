@@ -7,6 +7,10 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../data/location_service.dart';
 import '../../data/map_configuration.dart';
 import '../../data/photo_picker.dart';
+import '../../design_system/floating_surface.dart';
+import '../../design_system/theme.dart';
+import '../../design_system/tokens.dart';
+import '../../design_system/vehicle_selector.dart';
 import '../../domain/parking.dart';
 import '../../domain/place.dart';
 import '../account/account_controller.dart';
@@ -100,14 +104,25 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         _message('地圖尚未就緒，請稍後再定位。');
         return;
       }
-      await map
-          .animateCamera(CameraUpdate.newLatLng(LatLng(point.lat, point.lng)));
+      await _camera(CameraUpdate.newLatLng(LatLng(point.lat, point.lng)));
     } on LocationFailure catch (error) {
       if (mounted) _message(error.message);
     } catch (_) {
       if (mounted) _message('目前無法取得位置，請移動地圖後搜尋此區域。');
     } finally {
       if (mounted) setState(() => _locating = false);
+    }
+  }
+
+  /// Moves the camera, jumping instead of animating when Reduce Motion /
+  /// "Remove animations" is on.
+  Future<void> _camera(CameraUpdate update) async {
+    final map = _map;
+    if (map == null) return;
+    if (reduceMotion(context)) {
+      await map.moveCamera(update);
+    } else {
+      await map.animateCamera(update);
     }
   }
 
@@ -127,7 +142,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   void _moveCamera(PlaceDestination? previous, PlaceDestination? next) {
     if (next == null || identical(previous, next)) return;
     unawaited(
-      _map?.animateCamera(
+      _camera(
         CameraUpdate.newLatLngZoom(
           LatLng(next.location.lat, next.location.lng),
           16,
@@ -146,7 +161,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   void _moveTo(CameraRequest? previous, CameraRequest? next) {
     if (next == null || identical(previous, next)) return;
     unawaited(
-      _map?.animateCamera(
+      _camera(
         CameraUpdate.newLatLngZoom(
           LatLng(next.target.lat, next.target.lng),
           16,
@@ -229,59 +244,30 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Material(
-                    elevation: 3,
-                    borderRadius: BorderRadius.circular(24),
-                    color: Theme.of(context).colorScheme.surface,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(18, 8, 8, 8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '重機停車通',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleLarge
-                                  ?.copyWith(fontWeight: FontWeight.w800),
-                            ),
-                          ),
-                          SegmentedButton<VehicleType>(
-                            showSelectedIcon: false,
-                            segments: const [
-                              ButtonSegment(
-                                value: VehicleType.yellow,
-                                label: Text('黃牌'),
-                              ),
-                              ButtonSegment(
-                                value: VehicleType.red,
-                                label: Text('紅牌'),
-                              ),
-                            ],
-                            selected: {state.query.vehicle},
-                            onSelectionChanged: (selection) =>
-                                controller.setVehicle(selection.single),
-                          ),
-                          IconButton(
-                            tooltip: '我的帳號',
-                            onPressed: _openAccount,
-                            icon: const Icon(Icons.account_circle_outlined),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _DestinationBar(
+                  _SearchHeader(
                     destination: state.destination,
                     onSearch: _searchDestination,
                     onClear: controller.clearDestination,
+                    onAccount: _openAccount,
                   ),
                   const SizedBox(height: 8),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
+                    clipBehavior: Clip.none,
                     child: Row(
                       children: [
+                        FloatingSurface(
+                          radius: 999,
+                          elevation: 1,
+                          child: Padding(
+                            padding: const EdgeInsets.all(2),
+                            child: VehicleSelector(
+                              selected: state.query.vehicle,
+                              onChanged: controller.setVehicle,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         FilterChip(
                           avatar: const Icon(Icons.local_parking, size: 18),
                           label: const Text('目前有空位'),
@@ -348,18 +334,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             Positioned(
               right: 16,
               bottom: MediaQuery.sizeOf(context).height * 0.28 + 20,
-              child: FloatingActionButton.small(
-                heroTag: 'my-location',
-                tooltip: '定位我的位置',
-                onPressed: _locating ? null : _locate,
-                child: _locating
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.my_location),
-              ),
+              child: _LocateButton(locating: _locating, onPressed: _locate),
             ),
           ParkingPanel(state: state),
         ],
@@ -380,7 +355,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       mapToolbarEnabled: false,
       padding: EdgeInsets.only(
         bottom: MediaQuery.sizeOf(context).height * 0.28,
-        top: 220,
+        top: 150,
       ),
       onMapCreated: (map) => _map = map,
       onCameraMove: (position) => config.onCameraMove(
@@ -391,8 +366,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       clusterManagers: {
         ClusterManager(
           clusterManagerId: _clusterId,
-          onClusterTap: (cluster) => _map
-              ?.animateCamera(CameraUpdate.newLatLngBounds(cluster.bounds, 48)),
+          onClusterTap: (cluster) =>
+              _camera(CameraUpdate.newLatLngBounds(cluster.bounds, 48)),
         ),
       },
       markers: {
@@ -427,70 +402,115 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 }
 
-class _DestinationBar extends StatelessWidget {
-  const _DestinationBar({
+/// Search-first header: brand mark, destination field and account entry.
+/// iOS renders it as a translucent rounded search field over the map; Android
+/// follows the Material 3 search bar (full pill, surface container, elevation).
+class _SearchHeader extends StatelessWidget {
+  const _SearchHeader({
     required this.destination,
     required this.onSearch,
     required this.onClear,
+    required this.onAccount,
   });
   final PlaceDestination? destination;
   final VoidCallback onSearch;
   final VoidCallback onClear;
+  final VoidCallback onAccount;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final selected = destination;
-    return Material(
-      elevation: 2,
-      color: scheme.surface,
-      borderRadius: BorderRadius.circular(24),
-      child: Row(
-        children: [
-          Expanded(
-            child: Semantics(
-              button: true,
-              label: selected == null ? '搜尋目的地' : '目的地：${selected.name}，重新搜尋',
-              excludeSemantics: true,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(24),
-                onTap: onSearch,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: [
-                        Icon(
-                          selected == null ? Icons.search : Icons.flag,
-                          color: scheme.primary,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            selected?.name ?? '搜尋目的地',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: selected == null
-                                ? TextStyle(color: scheme.onSurfaceVariant)
-                                : null,
-                          ),
-                        ),
-                      ],
+    final material = theme.platform != TargetPlatform.iOS;
+    final field = Semantics(
+      button: true,
+      label: selected == null ? '搜尋目的地' : '目的地：${selected.name}，重新搜尋',
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onSearch,
+        borderRadius: BorderRadius.circular(material ? 28 : 16),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: material ? 56 : 48),
+          child: Padding(
+            padding: const EdgeInsets.only(left: 10, right: 4),
+            child: Row(
+              children: [
+                const ParkingMark(),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    selected?.name ?? '搜尋目的地',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: selected == null ? scheme.onSurfaceVariant : null,
+                      fontWeight: selected == null ? null : FontWeight.w600,
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
+        ),
+      ),
+    );
+    return FloatingSurface(
+      radius: material ? 28 : 16,
+      elevation: material ? 3 : 2,
+      child: Row(
+        children: [
+          Expanded(child: field),
           if (selected != null)
             IconButton(
               tooltip: '清除目的地',
               icon: const Icon(Icons.close),
               onPressed: onClear,
             ),
+          IconButton(
+            tooltip: '我的帳號',
+            onPressed: onAccount,
+            icon: const Icon(Icons.account_circle_outlined),
+          ),
+          const SizedBox(width: 4),
         ],
       ),
+    );
+  }
+}
+
+/// Material FAB on Android; a round translucent floating button on iOS, the
+/// way Apple Maps presents its location control.
+class _LocateButton extends StatelessWidget {
+  const _LocateButton({required this.locating, required this.onPressed});
+  final bool locating;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = locating
+        ? const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+          )
+        : const Icon(Icons.my_location);
+    if (Theme.of(context).platform == TargetPlatform.iOS) {
+      return FloatingSurface(
+        radius: 999,
+        elevation: 2,
+        child: IconButton(
+          tooltip: '定位我的位置',
+          onPressed: locating ? null : onPressed,
+          icon: icon,
+        ),
+      );
+    }
+    return FloatingActionButton(
+      heroTag: 'my-location',
+      tooltip: '定位我的位置',
+      onPressed: locating ? null : onPressed,
+      child: icon,
     );
   }
 }

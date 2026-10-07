@@ -5,6 +5,19 @@ Platform-adaptive UI with shared business logic and content. Do not require pixe
 Parking state must use icon/shape/text plus semantic color; never color alone.
 Support System / Light / Dark from MVP.
 
+## Implemented tokens (M9)
+- Brand: Taiwan parking-sign blue `#0B5CAD` (Material seed and the "P" mark).
+  Android 12+ uses Dynamic Color instead; the P mark stays sign blue.
+- Plate selector: yellow `#F2B705` / red `#C8102E` swatches, always beside 黃牌 / 紅牌.
+- Status badge: filled + check = 可停放, outlined + ? = 尚未確認, outlined + block =
+  不可停. Result tiles: filled = confirmed, outlined = unverified.
+- System fonts per platform; distances, counts and prices use tabular figures.
+- Search-first header: P mark, destination field, account. iOS uses a translucent
+  floating field and `CupertinoSlidingSegmentedControl`; Android uses the M3 search
+  bar shape, `SegmentedButton` and a FAB.
+- Minimum target 48dp; high-contrast themes; Reduce Motion disables camera
+  animation and translucency. See [accessibility audit](accessibility-audit.md).
+
 ## Map markers
 Represent `HEAVY_ONLY`, `MOTO_SHARED`, `CAR_SHARED`, `LIGHT_MOTO_ONLY` distinctly when those types are surfaced in an appropriate context. For YELLOW/RED parking search, `LIGHT_MOTO_ONLY` is `NOT_ALLOWED` and therefore remains excluded from normal parking results. Use clustering.
 

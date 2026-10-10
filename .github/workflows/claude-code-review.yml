@@ -35,6 +35,12 @@ jobs:
           # Review agents compare against the base branch and read history.
           fetch-depth: 0
 
+      # Comments that already exist (an earlier review or an @claude reply) must not
+      # count as this run's result.
+      - name: Record review start
+        id: start
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
@@ -53,7 +59,10 @@ jobs:
           # or https://code.claude.com/docs/en/cli-reference for available options
 
       # The action reports success even when tools were denied or nothing was posted,
-      # so a review that could not run looked identical to a clean review. Fail instead.
+      # so a review that could not run looked identical to a clean review.
+      # - Any denied tool call fails the job: the review is incomplete.
+      # - No new Claude comment without denials is the plugin's documented preflight stop
+      #   (already reviewed, automated or trivial PR): a warning, never a passing "review".
       # Output stays hidden (public repo): only denied tool names and command prefixes print.
       - name: Verify the review actually ran
         if: always() && steps.claude-review.outcome == 'success'
@@ -61,10 +70,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
           PR: ${{ github.event.pull_request.number }}
+          STARTED_AT: ${{ steps.start.outputs.at }}
         run: |
           set -euo pipefail
           if [ -z "${EXECUTION_FILE}" ] || [ ! -f "${EXECUTION_FILE}" ]; then
-            echo "::error::Claude review produced no execution file."
+            echo "::error::Claude review produced no execution file; no review ran."
             exit 1
           fi
           denials=$(jq '[.[] | select(.type == "result") | .permission_denials // [] | .[]] | length' "${EXECUTION_FILE}")
@@ -75,12 +85,16 @@ jobs:
               "${EXECUTION_FILE}"
             exit 1
           fi
-          comments=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
-            --jq '.[] | select(.user.login == "claude[bot]" or .user.login == "claude") | .id' | wc -l | tr -d ' ')
-          inline=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/comments" --paginate \
-            --jq '.[] | select(.user.login == "claude[bot]" or .user.login == "claude") | .id' | wc -l | tr -d ' ')
+          new_comments() {
+            gh api "repos/${GITHUB_REPOSITORY}/$1/${PR}/comments" --paginate --jq \
+              ".[] | select((.user.login == \"claude[bot]\" or .user.login == \"claude\")
+                and ((.created_at >= \"${STARTED_AT}\") or (.updated_at >= \"${STARTED_AT}\"))) | .id" | wc -l | tr -d ' '
+          }
+          comments=$(new_comments issues)
+          inline=$(new_comments pulls)
           if [ "${comments}" = "0" ] && [ "${inline}" = "0" ]; then
-            echo "::error::Claude review finished without posting any result on PR #${PR}."
-            exit 1
+            echo "::warning::Claude posted nothing in this run: the plugin's preflight skipped this PR (already reviewed, automated or trivial). This is not a review; comment '@claude review this PR' to request one."
+            echo "### Claude review skipped by plugin preflight — no review result for this run" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
-          echo "Claude review posted ${comments} comment(s) and ${inline} inline comment(s)."
+          echo "Claude review posted ${comments} comment(s) and ${inline} inline comment(s) in this run."

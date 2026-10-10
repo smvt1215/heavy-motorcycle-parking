@@ -472,5 +472,363 @@
       "roster_name": "藝文綜合行政大樓地下停車場",
       "match_count": 0
     }
+  ],
+  "roster_entries_note": "All 71 roster rows transcribed from the PDF (same SHA-256) on 2026-10-10. large_heavy_space_text is the roster's 大型重型機車停放空間 text verbatim; it never becomes capacity, a dedicated zone or permission.",
+  "roster_entries": [
+    {
+      "district": "八里區",
+      "roster_name": "渡船頭平面停車場",
+      "large_heavy_space_text": "6"
+    },
+    {
+      "district": "八里區",
+      "roster_name": "龍米平面停車場",
+      "large_heavy_space_text": "4"
+    },
+    {
+      "district": "三芝區",
+      "roster_name": "中正立體停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "環河快速高架橋下平面停車場",
+      "large_heavy_space_text": "12"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "忠孝路平面停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "停八平面停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "興穀國小地下停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "三重商工地下停車場",
+      "large_heavy_space_text": "9"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "三張地下停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "碧華國小地下停車場",
+      "large_heavy_space_text": "2"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "二重公園地下停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "光興國小地下停車場",
+      "large_heavy_space_text": "6"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "中山立體停車場",
+      "large_heavy_space_text": "4"
+    },
+    {
+      "district": "三重區",
+      "roster_name": "光榮國小地下停車場",
+      "large_heavy_space_text": "8"
+    },
+    {
+      "district": "土城區",
+      "roster_name": "金城立體停車場",
+      "large_heavy_space_text": "4"
+    },
+    {
+      "district": "土城區",
+      "roster_name": "員林平面停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "土城區",
+      "roster_name": "明德平面停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "土城區",
+      "roster_name": "中央公園地下停車場",
+      "large_heavy_space_text": "9"
+    },
+    {
+      "district": "中和區",
+      "roster_name": "大仁段停車場",
+      "large_heavy_space_text": "8"
+    },
+    {
+      "district": "中和區",
+      "roster_name": "佳和公園地下停車場",
+      "large_heavy_space_text": "6"
+    },
+    {
+      "district": "中和區",
+      "roster_name": "民德立體停車場",
+      "large_heavy_space_text": "6"
+    },
+    {
+      "district": "中和區",
+      "roster_name": "中和國小地下停車場",
+      "large_heavy_space_text": "45"
+    },
+    {
+      "district": "中和區",
+      "roster_name": "民享公園地下停車場",
+      "large_heavy_space_text": "6"
+    },
+    {
+      "district": "中和區",
+      "roster_name": "秀山公園地下停車場",
+      "large_heavy_space_text": "25"
+    },
+    {
+      "district": "五股區",
+      "roster_name": "五股工商立體停車場",
+      "large_heavy_space_text": "6"
+    },
+    {
+      "district": "五股區",
+      "roster_name": "芳洲平面停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "永和區",
+      "roster_name": "頂溪國小地下停車場",
+      "large_heavy_space_text": "6"
+    },
+    {
+      "district": "永和區",
+      "roster_name": "秀朗國小地下停車場",
+      "large_heavy_space_text": "8"
+    },
+    {
+      "district": "永和區",
+      "roster_name": "網溪國小地下停車場",
+      "large_heavy_space_text": "8"
+    },
+    {
+      "district": "永和區",
+      "roster_name": "永和國小地下停車場",
+      "large_heavy_space_text": "2格汽車格位優先重機停放"
+    },
+    {
+      "district": "永和區",
+      "roster_name": "福和國中地下停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "永和區",
+      "roster_name": "仁愛公園地下停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "新北市立圖書館地下停車場",
+      "large_heavy_space_text": "4"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "四維公園地下停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "音樂公園地下停車場",
+      "large_heavy_space_text": "2"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "大觀段平面停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "忠孝國中地下停車場",
+      "large_heavy_space_text": "2"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "民生公園地下停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "華東平面停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "板橋國小地下停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "市民廣場地下停車場",
+      "large_heavy_space_text": "20"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "大漢暨長江機車停車場",
+      "large_heavy_space_text": "9"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "華翠橋下平面停車場",
+      "large_heavy_space_text": "14"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "江翠國小地下停車場",
+      "large_heavy_space_text": "2"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "中山國小地下停車場",
+      "large_heavy_space_text": "3格汽車格位優先重機停放"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "府後立體停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "板橋國中地下停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "板橋區",
+      "roster_name": "重慶公園地下停車場",
+      "large_heavy_space_text": "6"
+    },
+    {
+      "district": "林口區",
+      "roster_name": "廣停三平面停車場",
+      "large_heavy_space_text": "2"
+    },
+    {
+      "district": "林口區",
+      "roster_name": "停一平面停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "林口區",
+      "roster_name": "停二平面停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "泰山區",
+      "roster_name": "文中一臨時平面停車場",
+      "large_heavy_space_text": "2"
+    },
+    {
+      "district": "泰山區",
+      "roster_name": "義學立體停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "泰山區",
+      "roster_name": "楓樹腳地下停車場",
+      "large_heavy_space_text": "15"
+    },
+    {
+      "district": "淡水區",
+      "roster_name": "文化機車立體停車場",
+      "large_heavy_space_text": "44"
+    },
+    {
+      "district": "淡水區",
+      "roster_name": "水碓立體停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "淡水區",
+      "roster_name": "民生立體停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "淡水區",
+      "roster_name": "三民立體停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "新店區",
+      "roster_name": "新店高中停車場",
+      "large_heavy_space_text": "8"
+    },
+    {
+      "district": "新店區",
+      "roster_name": "北新地下停車場",
+      "large_heavy_space_text": "4"
+    },
+    {
+      "district": "新莊區",
+      "roster_name": "新莊國中地下停車場",
+      "large_heavy_space_text": "2"
+    },
+    {
+      "district": "新莊區",
+      "roster_name": "民安國小地下停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "新莊區",
+      "roster_name": "捷運幸福站立體停車場",
+      "large_heavy_space_text": "1"
+    },
+    {
+      "district": "瑞芳區",
+      "roster_name": "瑞芳立體停車場",
+      "large_heavy_space_text": "2"
+    },
+    {
+      "district": "樹林區",
+      "roster_name": "藝文綜合行政大樓地下停車場",
+      "large_heavy_space_text": "4"
+    },
+    {
+      "district": "樹林區",
+      "roster_name": "樹林區第十三平面停車場",
+      "large_heavy_space_text": "2"
+    },
+    {
+      "district": "樹林區",
+      "roster_name": "長壽公園地下停車場",
+      "large_heavy_space_text": "3"
+    },
+    {
+      "district": "蘆洲區",
+      "roster_name": "仁愛立體停車場",
+      "large_heavy_space_text": "4"
+    },
+    {
+      "district": "蘆洲區",
+      "roster_name": "鷺江立體停車場",
+      "large_heavy_space_text": "15"
+    },
+    {
+      "district": "蘆洲區",
+      "roster_name": "溪墘公園地下停車場",
+      "large_heavy_space_text": "5"
+    },
+    {
+      "district": "蘆洲區",
+      "roster_name": "鷺江國中地下停車場",
+      "large_heavy_space_text": "4"
+    }
   ]
 }

@@ -27,6 +27,15 @@ from app.ingestion.rate_parser import parse_rate_text
 from app.ingestion.sources import NEW_TAIPEI_ROADSIDE_SOURCE
 from app.models.enums import ParkingSpaceType, RateParseStatus, RateType, RealtimeStatus, VehicleType
 
+# Exact single `pay` charging modes. 限時計次收 (time-limited per entry) is the mode
+# every real motorcycle cell carried on 2026-10-10. Combined weekday/holiday values
+# such as "限時計次收,假日限時計次收" and holiday-only modes stay unresolved.
+PAID_MODES = {
+    "計時收費": {RateType.HOURLY, RateType.TIME_BLOCK},
+    "計次收費": {RateType.PER_ENTRY},
+    "限時計次收": {RateType.PER_ENTRY},
+}
+
 
 def charging_schedule(record: dict[str, Any]) -> dict | None:
     days = {"週一-週五": [0, 1, 2, 3, 4], "週一-週六": [0, 1, 2, 3, 4, 5], "每天": list(range(7))}
@@ -83,11 +92,7 @@ class NewTaipeiRoadsideAdapter(NewTaipeiParkingAdapter):
         terms = self.raw_rate_text(rec)
         if terms:
             parsed = parse_rate_text(terms)
-            charging_types = {
-                "免費": {RateType.FREE},
-                "計時收費": {RateType.HOURLY, RateType.TIME_BLOCK},
-                "計次收費": {RateType.PER_ENTRY},
-            }
+            charging_types = {"免費": {RateType.FREE}, **PAID_MODES}
             mode = rec.get("pay")
             supported = charging_types.get(mode, set()) if isinstance(mode, str) else set()
             if parsed.parse_status == RateParseStatus.PARSED and parsed.rate_type not in supported:
@@ -118,7 +123,7 @@ class NewTaipeiRoadsideAdapter(NewTaipeiParkingAdapter):
             RoadsideScope(
                 city="new_taipei",
                 public=True if rec.get("countycode") == "65000" else None,
-                paid=True if rec.get("pay") in ("計次收費", "計時收費") else None,
+                paid=True if rec.get("pay") in PAID_MODES else None,
                 ordinary_motorcycle=motor,
                 special_restriction=False if memo in ("", "智慧化車格地磁;") else None,
                 schedule=schedule,

@@ -129,3 +129,55 @@ def test_invalid_identity_or_coordinates_fail_record(override):
 )
 def test_schedule_exact_terms_only(day, hour, expected):
     assert charging_schedule({"day": day, "hour": hour}) == expected
+
+
+REAL_MOTORCYCLE = json.loads((Path(__file__).parent / "fixtures/new_taipei/roadside_motorcycle_real.json").read_text())
+
+
+def real(cell_id):
+    return next(record for record in REAL_MOTORCYCLE if record["id"] == cell_id)
+
+
+@pytest.mark.parametrize("cell_id", ["151148", "151162"])
+def test_real_weekday_time_limited_per_entry_motor_cell_gets_scheduled_policy(cell_id):
+    record = real(cell_id)
+    assert (record["pay"], record["memo"], record["paycash"]) == ("限時計次收", "", "每次四小時30元/次")
+    (zone,) = ADAPTER.normalize_static(record).zones
+    assert zone.space_type == "MOTO_SHARED" and zone.normal_heavy is True and zone.large_heavy is None
+    (rule,) = zone.rules
+    assert rule.large_heavy is True and rule.normal_heavy is True and rule.authority_priority == 200
+    # Only during the posted charging window; outside it the policy rule is inactive.
+    assert rule.schedule == {
+        "timezone": "Asia/Taipei",
+        "weekdays": [0, 1, 2, 3, 4],
+        "start_time": "07:00",
+        "end_time": "20:00",
+    }
+    assert rule.evidence["pay"] == "限時計次收"
+    posted, large = zone.rates
+    # The posted ordinary text is retained but is not normalised into a guessed comparison price.
+    assert posted.vehicle == VehicleType.NORMAL_HEAVY and posted.parsed.parse_status == "PARTIALLY_PARSED"
+    assert posted.parsed.raw_text == "每次四小時30元/次"
+    assert large.vehicle == VehicleType.LARGE_HEAVY and large.parsed.base_amount == 30
+    assert large.parsed.unit_minutes == 240
+    assert ADAPTER.normalize_realtime(record).observations[0].status == RealtimeStatus.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "cell_id, reason",
+    [
+        ("156528", "holiday-only charging mode"),
+        ("151132", "combined weekday/holiday mode contradicts the holiday-only day field"),
+        ("154800", "undefined 車彎 memo restriction"),
+    ],
+)
+def test_real_motor_cells_with_unresolved_scope_keep_large_heavy_unknown(cell_id, reason):
+    (zone,) = ADAPTER.normalize_static(real(cell_id)).zones
+    assert zone.rules == (), reason
+    assert zone.large_heavy is None
+    assert all(rate.vehicle != VehicleType.LARGE_HEAVY for rate in zone.rates)
+
+
+@pytest.mark.parametrize("pay", ["限時計次收,假日限時計次收", "假日限時計次收", "累進收費", "不收費"])
+def test_only_exact_single_paid_modes_establish_policy_scope(pay):
+    assert ADAPTER.normalize_static(motor(pay=pay)).zones[0].rules == ()

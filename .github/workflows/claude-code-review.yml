@@ -48,7 +48,21 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # The plugin's eligibility step stopped silently on #43 with no recorded reason.
+          # Give it the repository context and make every stop leave an explicit reason.
+          prompt: |
+            /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+
+            Context for step 1 (eligibility):
+            - This pull request is opened by the repository owner, often through Claude Code, and needs a
+              full review. A "Generated with Claude Code" or "Co-Authored-By: Claude" line does not make it
+              an automated PR; the plugin itself says to still review Claude-generated PRs.
+            - Large or multi-file changes are never "trivial".
+            - When checking whether Claude has already commented, count only comments by claude[bot] that
+              contain a "## Code review" heading. Ignore "@claude" task replies and comments that start with
+              "Claude review skipped:".
+            - If you still stop at step 1, first post exactly one PR comment with `gh pr comment` that starts
+              with "Claude review skipped:" and names the condition that was true and why.
           # Agent mode grants only these tools. The plugin launches review subagents,
           # reads files and runs the gh commands its command file declares; anything
           # missing is denied silently in CI. Everything here is read-only except the
@@ -90,6 +104,15 @@ jobs:
               ".[] | select((.user.login == \"claude[bot]\" or .user.login == \"claude\")
                 and ((.created_at >= \"${STARTED_AT}\") or (.updated_at >= \"${STARTED_AT}\"))) | .id" | wc -l | tr -d ' '
           }
+          skipped=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate --jq \
+            ".[] | select((.user.login == \"claude[bot]\" or .user.login == \"claude\")
+              and (.created_at >= \"${STARTED_AT}\") and (.body | startswith(\"Claude review skipped:\")))
+              | .body | split(\"\\n\")[0] | .[0:300]")
+          if [ -n "${skipped}" ]; then
+            echo "::warning::${skipped}"
+            { echo "### Claude review skipped — not a review result"; echo; echo "${skipped}"; } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           comments=$(new_comments issues)
           inline=$(new_comments pulls)
           if [ "${comments}" = "0" ] && [ "${inline}" = "0" ]; then

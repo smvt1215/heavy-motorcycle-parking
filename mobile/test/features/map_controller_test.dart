@@ -279,6 +279,39 @@ void main() {
     expect(repo.nearbyCalls, isEmpty);
   });
 
+  for (final space in SpaceType.searchable) {
+    test('vehicle changes preserve compatible ${space.wireValue} filters',
+        () async {
+      final filtered =
+          controller.setFilters(state().query.copyWith(spaceType: space));
+      repo.nearbyCalls.last.completer.complete(_page());
+      await filtered;
+      final normal = controller.setVehicle(VehicleType.normalHeavy);
+      expect(repo.nearbyCalls.last.query.spaceType, space);
+      repo.nearbyCalls.last.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
+      await normal;
+      final large = controller.setVehicle(VehicleType.largeHeavy);
+      expect(repo.nearbyCalls.last.query.spaceType, space);
+      repo.nearbyCalls.last.completer.complete(_page());
+      await large;
+    });
+  }
+
+  test('large vehicle change clears only the invalid conventional-only filter',
+      () async {
+    final normal = controller.setVehicle(VehicleType.normalHeavy);
+    repo.nearbyCalls.last.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
+    await normal;
+    final filtered = controller
+        .setFilters(state().query.copyWith(spaceType: SpaceType.lightMotoOnly));
+    repo.nearbyCalls.last.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
+    await filtered;
+    final large = controller.setVehicle(VehicleType.largeHeavy);
+    expect(repo.nearbyCalls.last.query.spaceType, isNull);
+    repo.nearbyCalls.last.completer.complete(_page());
+    await large;
+  });
+
   test('out-of-order responses: stale vehicle response is discarded', () async {
     final red = controller.search();
     final yellow = controller.setVehicle(VehicleType.normalHeavy);

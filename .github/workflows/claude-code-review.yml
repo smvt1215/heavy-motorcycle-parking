@@ -60,9 +60,14 @@ jobs:
               Code" or "Co-Authored-By: Claude" line does not make it an automated PR (the plugin itself says to
               still review Claude-generated PRs). Otherwise apply the plugin's rules unchanged.
             - Large or multi-file changes are never "trivial".
-            - Claude has already reviewed this PR only if claude[bot] posted a comment containing a
+            - Claude has already reviewed this PR only if claude[bot] or claude posted a comment containing a
               "## Code review" heading or inline pull-request review comments. "@claude" task replies and
               comments that start with "Claude review skipped:" do not count.
+            - In the step-1 eligibility subagent, inspect summary comments with `gh pr view --comments` and
+              run this paginated read before deciding whether a prior review exists:
+              gh api --method GET repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments --paginate --jq '.[] | select(.user.login == "claude[bot]" or .user.login == "claude") | {id, body, created_at}'
+              `gh pr view --comments` omits inline findings. The API query includes prior Claude inline
+              comments from every page; they count as an existing review regardless of their timestamp.
             - If you still stop at step 1, first post exactly one PR comment with `gh pr comment` that starts
               with "Claude review skipped:" and names the condition that was true and why.
           # Agent mode grants only these tools. The plugin launches review subagents,
@@ -70,7 +75,7 @@ jobs:
           # missing is denied silently in CI. Everything here is read-only except the
           # two comment tools.
           claude_args: >-
-            --allowedTools "Task,Agent,Read,Glob,Grep,LS,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*)"
+            --allowedTools "Task,Agent,Read,Glob,Grep,LS,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh api --method GET repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*)"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 

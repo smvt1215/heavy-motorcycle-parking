@@ -6,6 +6,7 @@ import 'package:heavy_parking/design_system/vehicle_selector.dart';
 import 'package:heavy_parking/domain/parking.dart';
 import 'package:heavy_parking/features/map/map_controller.dart';
 import 'package:heavy_parking/features/map/map_screen.dart';
+import 'package:heavy_parking/features/map/parking_panel.dart';
 import 'package:heavy_parking/features/map/parking_presentation.dart';
 
 import 'fixtures/parking.dart';
@@ -110,25 +111,20 @@ void main() {
     expect(compatibilityReasonLabel('unsupported_source_reason'), isNull);
   });
 
-  test('detail rollup preserves allowed, unknown and prohibited facts', () {
+  test('detail zones retain allowed and opted-in unknown facts', () {
     ParkingDetail detail(List<String> statuses) => ParkingDetail.fromJson(
           detailFixture(
             zones: [for (final status in statuses) zoneJson(status: status)],
           ),
         );
     expect(
-      detailCompatibility(detail(['NOT_ALLOWED', 'ALLOWED'])),
+      displayDetailZones(
+        detail(['NOT_ALLOWED', 'ALLOWED']),
+        includeUnknown: true,
+      ).single.compatibility.status,
       CompatibilityStatus.allowed,
     );
-    expect(
-      detailCompatibility(detail(['NOT_ALLOWED', 'UNKNOWN'])),
-      CompatibilityStatus.unknown,
-    );
-    expect(
-      detailCompatibility(detail(['NOT_ALLOWED'])),
-      CompatibilityStatus.notAllowed,
-    );
-    expect(detailCompatibility(detail([])), CompatibilityStatus.unknown);
+    expect(displayDetailZones(detail([]), includeUnknown: true), isEmpty);
     expect(
       displayDetailZones(
         detail(['NOT_ALLOWED', 'UNKNOWN']),
@@ -169,6 +165,59 @@ void main() {
 
   const platforms =
       TargetPlatformVariant({TargetPlatform.android, TargetPlatform.iOS});
+  testWidgets('detail keeps the query badge and excludes other space types',
+      (tester) async {
+    final unknown = zoneJson(status: 'UNKNOWN', name: '搜尋範圍未確認區');
+    final lot = ParkingLot.fromJson(
+      lotJson(
+        status: 'UNKNOWN',
+        zones: [unknown],
+        rankingGroup: 1,
+        rankingScoreBp: null,
+        availabilitySummary: unknownSummaryJson(),
+      ),
+    );
+    final detail = ParkingDetail.fromJson(
+      detailFixture(
+        zones: [
+          unknown,
+          zoneJson(zoneId: 21, spaceType: 'CAR_SHARED', name: '範圍外可停區'),
+        ],
+        entrances: [],
+      ),
+    );
+    await tester.binding.setSurfaceSize(const Size(800, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: Scaffold(
+            body: ParkingPanel(
+              state: MapState(
+                query: const ParkingQuery(
+                  center: defaultMapCenter,
+                  includeUnknown: true,
+                  spaceType: SpaceType.heavyOnly,
+                ),
+                selectedLot: lot,
+                detail: detail,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('尚未確認'), findsWidgets);
+    expect(find.text('可停放'), findsNothing);
+    await tester.scrollUntilVisible(
+      find.textContaining('搜尋範圍未確認區'),
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.textContaining('範圍外可停區'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets(
     'both classes expose formal names to accessibility semantics',
     (tester) async {

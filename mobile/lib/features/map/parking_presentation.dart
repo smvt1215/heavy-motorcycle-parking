@@ -103,11 +103,13 @@ String taipeiTime(DateTime? instant) {
 List<ParkingZone> displayDetailZones(
   ParkingDetail detail, {
   required bool includeUnknown,
+  SpaceType? spaceType,
 }) =>
     detail.zones
         .where(
           (zone) =>
               SpaceType.forVehicle(detail.vehicle).contains(zone.spaceType) &&
+              (spaceType == null || zone.spaceType == spaceType) &&
               zone.compatibility.vehicle == detail.vehicle &&
               (zone.compatibility.status == CompatibilityStatus.allowed ||
                   (includeUnknown &&
@@ -124,21 +126,3 @@ String? compatibilityReasonLabel(String? reason) => switch (reason) {
       'space_type_default' => '依車格分類判斷',
       _ => null,
     };
-
-CompatibilityStatus detailCompatibility(ParkingDetail detail) {
-  final statuses = detail.zones
-      .where(
-        (zone) =>
-            zone.compatibility.vehicle == detail.vehicle &&
-            SpaceType.forVehicle(detail.vehicle).contains(zone.spaceType),
-      )
-      .map((zone) => zone.compatibility.status)
-      .toList();
-  if (statuses.contains(CompatibilityStatus.allowed)) {
-    return CompatibilityStatus.allowed;
-  }
-  if (statuses.isEmpty || statuses.contains(CompatibilityStatus.unknown)) {
-    return CompatibilityStatus.unknown;
-  }
-  return CompatibilityStatus.notAllowed;
-}

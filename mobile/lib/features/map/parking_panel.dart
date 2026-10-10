@@ -125,11 +125,7 @@ class ParkingPanel extends ConsumerWidget {
                 runSpacing: 4,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  _Compatibility(
-                    status: state.detail == null
-                        ? lot.compatibility
-                        : detailCompatibility(state.detail!),
-                  ),
+                  _Compatibility(status: lot.compatibility),
                   Text(
                     '${distanceLabel(lot.distanceM)} · ${state.query.vehicle.label}',
                     style: const TextStyle(fontFeatures: tabularFigures),
@@ -168,6 +164,7 @@ class ParkingPanel extends ConsumerWidget {
                   : displayDetailZones(
                       state.detail!,
                       includeUnknown: state.query.includeUnknown,
+                      spaceType: state.query.spaceType,
                     ))
                 _ZoneFacts(zone: zone),
               if (state.detail case final detail?) ...[

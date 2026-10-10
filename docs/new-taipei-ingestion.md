@@ -58,9 +58,10 @@ keeps its complete-snapshot semantics.
 | `TW97X`, `TW97Y` | Lot center via EPSG:3826 -> 4326 | No entrances (none published) |
 | `AVAILABLECAR` | Car observation | `-9`/missing => UNKNOWN; heavy counts never derived |
 
-There is no heavy-motorcycle count field, so every New Taipei lot is UNKNOWN for
-NORMAL_HEAVY/LARGE_HEAVY. It appears in nearby results only with `include_unknown=true`, labelled
-unverified and ranked after confirmed results. This is deliberate (AGENTS rules 7–9).
+Counts do not establish LARGE_HEAVY permission, so its unverified zones appear
+only with `include_unknown=true`, labelled unverified and ranked after confirmed
+results. Confirmed ordinary motorcycle zones support NORMAL_HEAVY without this
+option. This follows the mapping above and AGENTS rules 7–9.
 
 `PAYEX` is split on `;`. `小型車` -> CAR on car, `機車` -> NORMAL_HEAVY on motor,
 `重型機車` -> LARGE_HEAVY on heavy. `身障車`, `身障機車` (permit holders), `大型車`

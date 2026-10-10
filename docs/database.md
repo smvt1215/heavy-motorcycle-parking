@@ -22,6 +22,7 @@
 - user_reports
 - report_photos
 - access_tokens (M8; SHA-256 token digests only)
+- community verification (006): community_participants, source_verifications, community_cases, community_case_revisions, community_case_stances, community_evidence_photos, community_prechecks, community_precheck_results, community_case_events, contribution_ledger, idempotency_records
 
 ## Spatial rules
 `parking_lots.location` and `parking_entrances.location` use `GEOGRAPHY(POINT,4326)` with GiST indexes.
@@ -195,3 +196,27 @@ are added; downgrading restores the M1 schema while retaining existing rows.
 ## Development vehicle contract (005)
 
 005 adds NULL class permissions, preserves historical plate evidence and archives old enum values in legacy columns. It leaves saved preferences/vehicles unset rather than migrating user data. Existing plate-specific rates remain vehicle-NULL until reimport; internal CAR source tariffs stay CAR. Up/down preserves preexisting rows. New enum labels: NORMAL_HEAVY, LARGE_HEAVY, internal CAR (never public).
+
+## Community verification (006)
+
+`006_community_verification` is additive. It adds twelve native enums and eleven
+tables for source verification, cases, evidence, prechecks, the case timeline,
+contribution points and idempotency. The full contract, including state
+semantics, photo-time rules and the planned API, is in
+[community verification contract](community-verification-contract.md);
+[ADR 004](adr/004-community-verification.md) records the decision.
+
+| Relation | Stored identity and integrity |
+| --- | --- |
+| Participants | One row per user; `user_id` becomes NULL on user deletion while cases, stances, photos, events and points keep the same participant (RESTRICT). |
+| Source verifications | Source, fact kind and optional lot/zone scope (same-lot composite FK). Only PERMISSION carries `rule_kind` and `authority_priority`; parser code and config version appear together; HTTPS evidence URL; revocation not before verification. |
+| Cases | Source-resolved facts require an explicit rider `vehicle` and a same-lot `zone_id`; low-risk observations require `vehicle` NULL. Review status and stored publication state are separate; `EXPIRED` is never stored. Community/manual publications last exactly 90 days from `first_published_at` and verified-source publications have no term; community corroboration is limited to low-risk facts; PUBLISHED requires ACCEPTED; SUPERSEDED requires a different successor case. |
+| Revisions / stances | Revisions are unique per case with object-typed proposals and HTTPS source URLs. At most one active stance per participant per case (partial unique index); SUPPORT/OPPOSE require an observation; history is kept through withdrawal/invalidation timestamps. |
+| Evidence photos | Exactly one owner (revision or stance) on the same case via composite FKs. Only the EXIF original-time strings, UTC `captured_at`, status and parser version are stored, never GPS or full EXIF. A CHECK ties each time status to its fields and the inclusive 30-day receipt window. Deletion clears the object key and private time fields but keeps the row and `normalized_sha256`. |
+| Prechecks / events / ledger | Precheck runs and results, case events and contribution entries reject UPDATE through the `community_reject_update()` trigger; revisions and stances allow only set-once moderation/withdrawal columns, and photos only the one-way deletion. A precheck references an existing `(case_id, revision)`; ledger reversals reference an AWARD of the same case and participant. Non-PASS results need a reason; manual decisions need actor, reason code and text. The ledger allows one AWARD and one REVOKE per participant per case, with fixed points per entry type. |
+| Idempotency | Unique `(user_id, operation, idempotency_key)` with a SHA-256 request digest and stored response; expiry is checked at read time. |
+
+Lot deletion cascades zones, cases and their community records. No legacy
+`user_reports` row is converted, published, awarded points or given a guessed
+photo time. Downgrading to `005_vehicle_classes` removes the community tables,
+enums and trigger function while retaining legacy reports.

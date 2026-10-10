@@ -38,5 +38,17 @@ Create `BaseParkingAdapter`, then `TaipeiParkingAdapter` and `NewTaipeiParkingAd
 `GOVERNMENT`, `OPERATOR`, `COMMUNITY`, `MANUAL`.
 Community reports never silently overwrite official data; they remain separately attributable until a verification workflow promotes a correction.
 
+## Reference materials (not ingested)
+
+Reference materials help locate gaps and candidates for verification. They are
+never ingested, never assigned a `data_source`, and never confirm legality,
+rates, availability or entrance access. A lead becomes a fact only after the
+matching official/operator source is verified and normalized (see
+[community verification plan](community-verification-plan.md) §2).
+
+| Material | Nature | Allowed use |
+| --- | --- | --- |
+| [Alan大重停車記事](https://www.google.com/maps/d/viewer?mid=1ORD5DnL6yqrCrtQJYB9TeTgOOlvo-Yc)（Google My Maps） | Rider-submitted map curated by its author via a Google Form; about 1,321 placemarks in 9 layers (free/car-rate/heavy-bay/motorcycle-rate lots, roadside bays, heavy-friendly shops, prohibited, unconfirmed); free-text notes; no license stated. Checked 2026-10-10 (map changelog last updated 2026-10-06). | Twin-city gap and conflict leads for #33, e.g. lots we lack or hold as UNKNOWN, and "禁停重機" entries to cross-check against our data. No bulk copying, republication or redistribution of its content without the author's permission. |
+
 ## Licensing
 Repository source code is Apache-2.0. External datasets remain under their original terms. Taiwan government open data attribution must be retained as required by the applicable source license. Google Maps/Places content is governed by Google terms and is not relicensed under Apache-2.0.

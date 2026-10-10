@@ -24,6 +24,11 @@ Base path: `/api/v1`.
 - `POST /auth/logout`
 - `POST /auth/dev-session` (DEV environment only; not part of the stable contract)
 
+Community verification endpoints (`/community/...`, `/me/community/...`,
+`/me/contributions`, `/parking/{id}/community-observations`, `/moderation/...`)
+are specified in the [community verification contract](community-verification-contract.md)
+and implemented by #34; they are not part of the current OpenAPI document.
+
 ## Authentication and authorization
 Public parking discovery endpoints are usable without authentication unless explicitly stated otherwise.
 

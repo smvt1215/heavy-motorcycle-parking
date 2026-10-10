@@ -66,7 +66,7 @@ GATE_SENSOR_FAILED, OTHER.
 ## Report photos
 
 `POST /reports/{id}/photos` (multipart `file`, owner only, pending reports only, at
-most 3 per report, `REPORT_PHOTO_MAX_BYTES` default 5 MB):
+most 3 per report, `REPORT_PHOTO_MAX_BYTES` default 15 MB since #32, so phones can send unmodified originals):
 
 - An ASGI guard rejects photo request bodies larger than the limit + 64 KB with 413
   `PAYLOAD_TOO_LARGE` **before** multipart parsing spools them (declared

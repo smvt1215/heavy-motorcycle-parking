@@ -125,4 +125,4 @@ All rights reserved.
 
 整合結果、實機與金鑰待驗項目：[整合驗收紀錄](docs/integration-acceptance.md)。
 
-下一輪資料補齊、社群核實與 Flutter Web 初複審工作台：[實作計畫](docs/community-verification-plan.md)。
+下一輪資料補齊、社群核實與 Flutter Web 初複審工作台：[實作計畫](docs/community-verification-plan.md)。資料模型、狀態與 API 規格：[社群核實契約](docs/community-verification-contract.md)。

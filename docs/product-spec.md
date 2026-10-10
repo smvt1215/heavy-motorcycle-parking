@@ -72,6 +72,9 @@ When `include_unknown=true`:
 
 No AI/LLM ranking is used in MVP.
 
+## Community verification (planned)
+Riders can report and corroborate structured observations with photos; see the [plan](community-verification-plan.md) and [contract](community-verification-contract.md). Three independent corroborators can publish only low-risk observations (lighting, rain cover, charging, entrance location) for 90 days, labelled separately from official data. Votes never confirm parking permission, rates, realtime availability or entrance access; those require a verified source or a manual decision and keep the precedence rules above. Community observations do not affect ranking, `available_only`, rate filters or default navigation. Photos stay private and there is no public leaderboard or social feed.
+
 ## MVP non-goals
 No in-app turn-by-turn navigation, payment, monthly-rental marketplace, social feed/chat, AI ranking, CarPlay, Android Auto, or prohibited-location discovery mode.
 

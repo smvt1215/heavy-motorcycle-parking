@@ -48,6 +48,10 @@ facts through `ParkingCompatibilityService.evaluate`. It has no ORM/HTTP/UI
 dependency; repositories map normalized database evidence to explicit rule
 inputs, and holiday coverage is injected as a local calendar snapshot.
 
+Community verification ([contract](community-verification-contract.md)) keeps
+cases, evidence and points in separate tables; its pure policies live in
+`app/domain/community.py`, and nothing in it writes normalized parking facts.
+
 ## GIS
 Store geospatial points as `GEOGRAPHY(POINT,4326)`. Nearby search uses `ST_DWithin` and GiST indexes. Never fetch all rows and calculate distance in Python.
 

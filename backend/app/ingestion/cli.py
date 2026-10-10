@@ -12,7 +12,7 @@ import httpx
 from app.cache import get_redis
 from app.db import get_db_engine, get_sessionmaker
 from app.ingestion.contracts import FeedSnapshot
-from app.ingestion.downloader import DownloadError, ParkingDownloader, decode_json
+from app.ingestion.downloader import DownloadError, ParkingDownloader, decode_document
 from app.ingestion.new_taipei import NewTaipeiParkingAdapter
 from app.ingestion.new_taipei_roadside import NewTaipeiRoadsideAdapter
 from app.ingestion.pipeline import ParkingIngestionPipeline
@@ -62,7 +62,9 @@ async def run(options: argparse.Namespace) -> int:
                     path = getattr(options, f"{kind}_file")
                     if path is not None:
                         try:
-                            payload = decode_json(path.read_bytes(), fetched_at)
+                            # A .csv replay is decoded exactly like the live CSV document.
+                            document_format = "csv" if path.suffix.lower() == ".csv" else "json"
+                            payload = decode_document(path.read_bytes(), fetched_at, document_format)
                         except DownloadError as exc:
                             result = await pipeline.record_download_failure(kind, exc)
                         else:

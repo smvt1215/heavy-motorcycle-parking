@@ -21,6 +21,7 @@ M7 adds the [New Taipei paged feeds](new-taipei-ingestion.md) through the same
 worker. Confirmed ordinary motorcycle zones support NORMAL_HEAVY.
 [Reviewed twin-city policies and New Taipei roadside ingestion](twin-city-policy.md)
 add LARGE_HEAVY permission only inside verified scope; all other permissions stay UNKNOWN.
+The [twin-city data gap report](twin-city-data-gaps.md) records the 2026-10-10 source checks, the rerunnable roster reconciliation and what remains UNKNOWN.
 
 ## Adapter contract
 Create `BaseParkingAdapter`, then `TaipeiParkingAdapter` and `NewTaipeiParkingAdapter`. City-specific parsing stays outside core domain logic.

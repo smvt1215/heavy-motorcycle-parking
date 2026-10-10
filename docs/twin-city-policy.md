@@ -20,6 +20,8 @@
 
 ## 新北公有路外場站核對
 
+`python -m app.ingestion.roster [--static-file <快照>] [--format markdown|json]` 會重跑名冊核對，列出每一列名冊的狀態與候選。最新結果與 16 處未匹配的原因見[缺口報告](twin-city-data-gaps.md#4-新北公有路外名冊16-處未匹配)。
+
 [官方名冊（114/05/12）](https://www.traffic.ntpc.gov.tw/websitedowndoc?file=traffic%2F202505141350170.pdf&filedisplay=%E6%96%B0%E5%8C%97%E5%B8%82%E5%81%9C%E8%BB%8A%E5%A0%B4%E5%A4%A7%E5%9E%8B%E9%87%8D%E5%9E%8B%E6%A9%9F%E8%BB%8A%E6%A0%BC%E4%BD%8D%E5%8F%8A%E9%81%A9%E7%95%B6%E7%A9%BA%E9%96%93%E7%B5%B1%E8%A8%88%E8%A1%A8%281140512%29.pdf) 有71處。以行政區及唯一完整名稱核對路外來源，僅容許相同行政區名稱前綴差異；55處取得來源 ID，16處未匹配。結果及 PDF SHA-256 保存於 `backend/app/ingestion/evidence/new_taipei_managed_facilities.json`，隨 backend wheel 打包。
 
 個別場站的政策規則不早於名冊確認範圍的2025-05-12；公告日期仍獨立保存為2025-03-21，不據此推測更早的轄管身份。執行時必須同時精確符合來源 ID、名稱、行政區、地址。地址或名稱變更、ID 未核對、沒有明確汽車區時不掛政策。名冊不能證明全部政府資料中的場站都是轄管公有場站；`TYPE` 表示即時資料分類，也不能當成所有權。
@@ -30,25 +32,28 @@
 
 ## 新北路邊介接
 
-[新北市路邊停車位資訊](https://data.gov.tw/dataset/122901) 的 JSON 端點：
+[新北市路邊停車位資訊](https://data.gov.tw/dataset/122901)：static 讀 CSV 完整檔，realtime 讀分頁 JSON。
 
-`https://data.ntpc.gov.tw/api/datasets/54a507c4-c038-41b5-bf60-bbecb9d052c6/json`
+- static：`https://data.ntpc.gov.tw/api/datasets/54a507c4-c038-41b5-bf60-bbecb9d052c6/csv/file`
+- realtime：`https://data.ntpc.gov.tw/api/datasets/54a507c4-c038-41b5-bf60-bbecb9d052c6/json`
+
+2026-10-10 的分頁 JSON 一直比 CSV 少 605 組 `(id, roadid)`，CSV 的 31,560 列與資料集標示的筆數相同，因此 static 改用 CSV。CSV 解碼成 `{"format": "csv", "sha256", "header", "rows"}` 保存；必須是 UTF-8，且每列欄位數與標頭相同，否則整份拒絕（`INVALID_CSV`）並保存原始位元組。
 
 ```bash
 python -m app.ingestion.cli --city new_taipei_roadside --feed all
 python -m app.ingestion.cli --city new_taipei_roadside --feed static \
-  --static-file tests/fixtures/new_taipei/roadside_sample.json \
+  --static-file tests/fixtures/new_taipei/roadside_real.csv \
   --fetched-at 2026-10-10T02:00:00Z --no-cache
 ```
 
-static 與 realtime 使用不同來源代碼，保留相同來源的原始 payload。每頁1000筆、最多100頁；失敗頁不當成完整快照，資料驟減低於80%時不撤回缺漏車格。使用獨立 namespace、鎖及快取鍵，避免與路外 ID 撞號。
+static 與 realtime 使用不同來源代碼，保留相同來源的原始 payload。`.csv` 檔以 CSV 重播，其他副檔名以 JSON 重播。realtime 每頁1000筆、最多100頁，失敗頁不當成完整快照。static 資料驟減低於80%時不撤回缺漏車格。使用獨立 namespace、鎖及快取鍵，避免與路外 ID 撞號。
 
 | 欄位 | 使用方式 |
 | --- | --- |
 | `id`／`cellid`／`roadname` | 車格來源 ID、展示名稱；每個明確車格一區，不以費率或格數判斷合法性 |
 | `latitude`／`longitude` | 明確車格座標；不是已確認可進入的入口 |
 | `name` | 僅精確一般機車／汽車標籤提供該類 baseline；特殊或未定義類別 UNKNOWN |
-| `countycode`、`pay`、`memo` | 政策需新北、公有來源、明確已收費的一般機車格及確認無特殊限制；未定義 memo 不授權 |
+| `countycode`、`pay`、`memo` | 政策需新北、公有來源、明確已收費的一般機車格及確認無特殊限制。收費只認單一的 `計時收費`、`計次收費`、`限時計次收`；合併值（如 `限時計次收,假日限時計次收`）、`假日…`、`累進收費`、`不收費` 不算。未定義 memo 不授權 |
 | `day`／`hour` | 只接受明確週一至週五、週一至週六、每天及 HH:MM 時段；不明時段維持 UNKNOWN |
 | `paycash` | 獨立保留原文並核對 `pay`；免費／計次／計時與原文衝突或模式未知時不產生確認價格；不證明合法性 |
 | `isnowcash` | 目前收費旗標，不能證明政策範圍 |
@@ -58,7 +63,7 @@ static 與 realtime 使用不同來源代碼，保留相同來源的原始 paylo
 
 ## 已確認資料與限制
 
-2026-10-10 抽查新北路外兩頁（1384筆）及路邊首頁（1000筆）；路邊樣本前三筆為真實汽車格。測試中的「機車停車位」政策邊界案例明確標為合成資料，不冒充已找到的真實付費機車格。
+2026-10-10 抽查新北路外兩頁（1384筆）及路邊首頁（1000筆）；路邊樣本前三筆為真實汽車格。同日再抓新北路邊完整 31 頁（30,941 列），找到 48 筆真實 `機車停車位`，其中 33 筆符合政策範圍；`roadside_motorcycle_real.json` 是其中的真實樣本。其他「機車停車位」政策邊界案例仍明確標為合成資料。完整數字與缺口見[缺口報告](twin-city-data-gaps.md)。
 
 臺北既有 V2 來源為路外場站。路邊 XML 的 `roadSegCarType`、費率單位與車格狀態缺少已確認的分類字典，不能證明收費一般機車格。因此臺北路邊政策已納入可套用的規則及生效／範圍測試，但尚未把未核對 XML 車格授權。`apply_roadside_policy` 僅接受已確認公有、收費、一般機車、特殊限制與停放時段的 scope evidence；新增實際 scope mapping 前需取得可靠來源定義。
 

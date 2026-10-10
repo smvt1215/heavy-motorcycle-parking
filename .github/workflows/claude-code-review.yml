@@ -49,18 +49,20 @@ jobs:
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           # The plugin's eligibility step stopped silently on #43 with no recorded reason.
-          # Give it the repository context and make every stop leave an explicit reason.
+          # Give it the real author relationship and make every stop leave an explicit reason.
           prompt: |
             /code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
 
             Context for step 1 (eligibility):
-            - This pull request is opened by the repository owner, often through Claude Code, and needs a
-              full review. A "Generated with Claude Code" or "Co-Authored-By: Claude" line does not make it
-              an automated PR; the plugin itself says to still review Claude-generated PRs.
+            - PR author: ${{ github.event.pull_request.user.login }} (account type ${{ github.event.pull_request.user.type }}, author association ${{ github.event.pull_request.author_association }}).
+            - If the author association is OWNER, MEMBER or COLLABORATOR and the account type is User, the PR was
+              opened by a maintainer, often through Claude Code, and needs a full review: a "Generated with Claude
+              Code" or "Co-Authored-By: Claude" line does not make it an automated PR (the plugin itself says to
+              still review Claude-generated PRs). Otherwise apply the plugin's rules unchanged.
             - Large or multi-file changes are never "trivial".
-            - When checking whether Claude has already commented, count only comments by claude[bot] that
-              contain a "## Code review" heading. Ignore "@claude" task replies and comments that start with
-              "Claude review skipped:".
+            - Claude has already reviewed this PR only if claude[bot] posted a comment containing a
+              "## Code review" heading or inline pull-request review comments. "@claude" task replies and
+              comments that start with "Claude review skipped:" do not count.
             - If you still stop at step 1, first post exactly one PR comment with `gh pr comment` that starts
               with "Claude review skipped:" and names the condition that was true and why.
           # Agent mode grants only these tools. The plugin launches review subagents,
@@ -72,12 +74,11 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
-      # The action reports success even when tools were denied or nothing was posted,
-      # so a review that could not run looked identical to a clean review.
-      # - Any denied tool call fails the job: the review is incomplete.
-      # - No new Claude comment without denials is the plugin's documented preflight stop
-      #   (already reviewed, automated or trivial PR): a warning, never a passing "review".
-      # Output stays hidden (public repo): only denied tool names and command prefixes print.
+      # The action reports success even when tools were denied, a skip was stated or
+      # nothing was posted. Pass only when this run posted a review (summary or inline
+      # findings) without denied tools; everything else fails and says why. This job is not
+      # a required check, so a red result marks "not reviewed" without blocking merges.
+      # Decision logic: .github/scripts/verify_claude_review.py (tested in backend/tests).
       - name: Verify the review actually ran
         if: always() && steps.claude-review.outcome == 'success'
         env:
@@ -91,33 +92,7 @@ jobs:
             echo "::error::Claude review produced no execution file; no review ran."
             exit 1
           fi
-          denials=$(jq '[.[] | select(.type == "result") | .permission_denials // [] | .[]] | length' "${EXECUTION_FILE}")
-          if [ "${denials}" != "0" ]; then
-            echo "::error::Claude review was denied ${denials} tool call(s); the review is incomplete."
-            jq -r '.[] | select(.type == "result") | .permission_denials // [] | .[]
-              | "- " + .tool_name + (if .tool_input.command then ": " + (.tool_input.command | .[0:80]) else "" end)' \
-              "${EXECUTION_FILE}"
-            exit 1
-          fi
-          new_comments() {
-            gh api "repos/${GITHUB_REPOSITORY}/$1/${PR}/comments" --paginate --jq \
-              ".[] | select((.user.login == \"claude[bot]\" or .user.login == \"claude\")
-                and ((.created_at >= \"${STARTED_AT}\") or (.updated_at >= \"${STARTED_AT}\"))) | .id" | wc -l | tr -d ' '
-          }
-          skipped=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate --jq \
-            ".[] | select((.user.login == \"claude[bot]\" or .user.login == \"claude\")
-              and (.created_at >= \"${STARTED_AT}\") and (.body | startswith(\"Claude review skipped:\")))
-              | .body | split(\"\\n\")[0] | .[0:300]")
-          if [ -n "${skipped}" ]; then
-            echo "::warning::${skipped}"
-            { echo "### Claude review skipped — not a review result"; echo; echo "${skipped}"; } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          comments=$(new_comments issues)
-          inline=$(new_comments pulls)
-          if [ "${comments}" = "0" ] && [ "${inline}" = "0" ]; then
-            echo "::warning::Claude posted nothing in this run: the plugin's preflight skipped this PR (already reviewed, automated or trivial). This is not a review; comment '@claude review this PR' to request one."
-            echo "### Claude review skipped by plugin preflight — no review result for this run" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "Claude review posted ${comments} comment(s) and ${inline} inline comment(s) in this run."
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate --jq '.[]' | jq -s '.' > "${RUNNER_TEMP}/issue-comments.json"
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/comments" --paginate --jq '.[]' | jq -s '.' > "${RUNNER_TEMP}/review-comments.json"
+          python3 .github/scripts/verify_claude_review.py "${EXECUTION_FILE}" \
+            "${RUNNER_TEMP}/issue-comments.json" "${RUNNER_TEMP}/review-comments.json" "${STARTED_AT}"

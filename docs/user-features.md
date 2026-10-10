@@ -61,7 +61,9 @@ GATE_SENSOR_FAILED, OTHER.
   The public list also accepts `status`, so older VERIFIED evidence stays reachable
   behind newer pending reports.
 - Promoting verified evidence into normalized facts is a future, separately
-  attributed workflow.
+  attributed workflow. The structured community verification flow (#34) is separate:
+  see the [community verification contract](community-verification-contract.md).
+  Legacy reports are not converted into cases.
 
 ## Report photos
 

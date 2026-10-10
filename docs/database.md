@@ -220,3 +220,12 @@ Lot deletion cascades zones, cases and their community records. No legacy
 `user_reports` row is converted, published, awarded points or given a guessed
 photo time. Downgrading to `005_vehicle_classes` removes the community tables,
 enums and trigger function while retaining legacy reports.
+
+## Participant suspension (007)
+
+`007_participant_suspension` adds nullable `community_participants.suspended_at`
+and `suspended_reason`, set together (`ck_community_participants_suspension_has_reason`).
+A suspended participant cannot submit cases, stances or photos, and their active
+stances stop counting toward corroboration or objections. `community_cases.updated_at`
+is written explicitly with the request instant (no ORM `onupdate`); the column
+and its server default are unchanged.

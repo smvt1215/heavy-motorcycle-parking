@@ -1,8 +1,8 @@
 # 社群核實契約
 
-更新日期：2026-10-10。Issue：[#32](https://github.com/smvt1215/heavy-motorcycle-parking/issues/32)。來源計畫：[社群核實計畫](community-verification-plan.md)。
+更新日期：2026-10-10。Issue：[#32](https://github.com/smvt1215/heavy-motorcycle-parking/issues/32)（契約）、[#34](https://github.com/smvt1215/heavy-motorcycle-parking/issues/34)（後端實作）。來源計畫：[社群核實計畫](community-verification-plan.md)。
 
-本文件是 #33–#37 實作要遵守的規格。#32 交付的範圍是：資料庫遷移 `006_community_verification`、ORM 模型、`app/domain/community.py` 的純函式，以及照片上限的預設值。**API 端點、背景處理與手機／Web 畫面尚未實作**；第 9 節列出的端點是 #34 要實作的規格，目前 OpenAPI 裡還沒有這些端點。
+本文件是 #33–#37 實作要遵守的規格。#32 交付資料庫遷移 `006_community_verification`、ORM 模型、`app/domain/community.py` 的純函式與照片上限預設值；#34 實作了第 9 節的後端 API（遷移 `007_participant_suspension`、`app/services/community_cases.py`、`app/routers/community_cases.py`），已在 OpenAPI 中。**手機與 Web 工作台畫面尚未實作**（#35、#36）。
 
 不變的部分：`/api/v1` 既有端點、共通 zone wire schema、規則優先序與 `sort_version=1` 都不變。社群資料不寫入 `parking_rules`、`parking_rates`、`parking_realtime`、`parking_entrances` 或 `parking_facilities`。
 
@@ -158,7 +158,7 @@ DB 約束：
 - **時間軸**：`community_case_events` 不可修改。`MANUAL_ACCEPTED`、`MANUAL_REJECTED`、`EVIDENCE_REQUESTED`、`SUPERSEDED` 必須記錄操作的管理員、原因代碼和原因文字。`actor_participant_id` 為 NULL 代表系統操作。
 - **人工採納**：缺 metadata 的照片被人工採納後，`time_status` 仍然不是 `VALID`，也不回填成自動補證的票數。
 
-社群自動發布有功能開關 `COMMUNITY_AUTO_PUBLISH_ENABLED`，由 #34 實作，**預設關閉**。開關關閉時，原本可以自動發布的案件改轉人工。對外公開啟用前，必須先有正式的身分驗證。
+社群自動發布有功能開關 `COMMUNITY_AUTO_PUBLISH_ENABLED`（#34 已實作），**預設關閉**。開關關閉時，原本可以自動發布的案件改轉人工。對外公開啟用前，必須先有正式的身分驗證。
 
 ## 7. 貢獻積分
 
@@ -190,7 +190,7 @@ DB 約束：
 - 建立案件、補件、立場、異議、管理員決定都要帶 `Idempotency-Key` header（1–128 字元）。後端保存 24 小時（`IDEMPOTENCY_TTL`），以 `(user_id, operation, key)` 為唯一值：同一個 key 但請求內容不同，回 `422 IDEMPOTENCY_KEY_REUSED`；內容相同的重試，回傳當初的狀態碼與內容。過期紀錄由讀取時判斷，不依賴背景排程。
 - 管理員寫入時帶 `expected_version`；與案件目前的 `version` 不符時回 `409 VERSION_CONFLICT`。計票、發布、版本與積分在同一個交易內更新。
 
-## 9. #34 要實作的 API
+## 9. API（#34 已實作）
 
 所有寫入端點都用 Bearer token 驗證身分，request body 不接受 `user_id` 等未知欄位。管理員端點要求 `MODERATOR`。
 
@@ -198,7 +198,7 @@ DB 約束：
 | --- | --- | --- |
 | `POST /community/cases` | 登入 | 建立案件與第 1 版 revision；201 回傳案件 |
 | `POST /community/cases/{id}/revisions` | 作者，限 `NEEDS_EVIDENCE` | 補件，建立新 revision 並重新初審 |
-| `POST /community/cases/{id}/photos` | 作者或已提出立場者 | multipart `file` 加 `owner=revision\|stance`；回傳時間判定 |
+| `POST /community/cases/{id}/photos` | 作者或已提出立場者 | multipart `file` 加表單欄位 `owner=revision\|stance`；回傳時間判定。每份提交（revision 或立場）最多 3 張；不接受客戶端送的時間 |
 | `PUT /community/cases/{id}/stance` | 登入，非作者 | `{"stance", "observed_value"}`，取代自己目前的立場 |
 | `DELETE /community/cases/{id}/stance` | 本人 | 撤回立場；204 |
 | `GET /me/community/cases` | 本人 | 自己的案件（keyset 分頁） |
@@ -212,6 +212,8 @@ DB 約束：
 | `DELETE /moderation/photos/{photo_id}` | `MODERATOR` | 處理照片刪除請求 |
 | `POST /moderation/source-verifications` | `MODERATOR` | 建立來源核實 |
 | `POST /moderation/source-verifications/{id}/revoke` | `MODERATOR` | 撤銷來源核實 |
+| `PUT /moderation/participants/{id}/suspension` | `MODERATOR` | `{"reason_code"}`，停權並重新計算其有效立場所在的案件 |
+| `DELETE /moderation/participants/{id}/suspension` | `MODERATOR` | 解除停權並重新計算 |
 
 上傳照片的回應：
 
@@ -260,8 +262,26 @@ DB 約束：
 - `403 PARTICIPANT_SUSPENDED`
 - `409 CASE_NOT_AWAITING_EVIDENCE`
 - `422 SCOPE_INVALID`（車種或區域不符合第 1 節）
+- `422 VALUE_INVALID`（提議值或觀察值不符合第 1 節的格式）
+- `422 IDEMPOTENCY_KEY_INVALID`（不是 1–128 個可見 ASCII 字元）
+- `409 CASE_CLOSED`（已駁回、已取代或已撤回）、`409 CASE_EXPIRED`（觀察已到期，須另開新案）
+- `409 STANCE_REQUIRED`、`409 STANCE_HAS_NO_EVIDENCE`（`CANNOT_CONFIRM` 不收照片）、`409 PHOTO_LIMIT_REACHED`
+- `409 INVALID_DECISION`、`422 SUCCESSOR_INVALID`、`409 ALREADY_REVOKED`
+- `429 RATE_LIMITED`（社群寫入預設每位使用者每分鐘 30 次，`COMMUNITY_WRITE_RATE_LIMIT_PER_MINUTE`）
 
 既有的 `401 UNAUTHENTICATED`／`403 FORBIDDEN` 語義不變。
+
+### 9.1 實作細節
+
+- **觸發時機**：建立案件、補件、上傳照片、改變或撤回立場、刪除照片、停權或解除停權之後，都會重新跑一次初審，寫入 `community_prechecks` 與時間軸。
+- **原回報還沒上傳照片時**：案件維持 `AWAITING_CORROBORATION`，不會立刻轉人工；如果已有 3 位有效支持者，作者卻一直沒上傳照片，就轉人工。照片已上傳但時間都不符合條件時，直接轉人工。
+- **改變立場**：舊立場撤回、另建一筆新立場，舊立場的照片不會搬過去，必須重新上傳。
+- **人工採納被暫停的觀察**：恢復發布、不重設期限，當下有效的異議會被標成 `OVERRULED`，凍結的積分解凍。
+- **人工駁回已發布的觀察**：撤回發布、收回這個案件的所有積分，並給有效異議者 `UPHELD_OBJECTION` 1 分。
+- **由新案取代**：撤回發布，但已取得的積分不收回，因為取代不代表原本的證據無效。
+- **刪除照片**：先 commit 資料庫的刪除，再刪儲存物件。若社群核實的觀察因此失去原回報證據，就暫停並轉人工。
+- **並行寫入**：每次寫入都鎖定案件那一列；積分有唯一約束，同時達到門檻也只會各發一次。
+- **公開觀察**：只列目前 `PUBLISHED` 且未到期的案件，內容只有結構化的值，不含任何自由文字、作者或補證者的身分。
 
 ## 10. 程式對應
 
@@ -269,5 +289,8 @@ DB 約束：
 | --- | --- |
 | 列舉值 | `backend/app/models/enums.py` |
 | 資料表與約束 | `backend/app/models/community.py`、`backend/migrations/versions/006_community_verification.py` |
-| 拍攝時間、發布時檢查、EXPIRED、積分、等級 | `backend/app/domain/community.py` |
-| 測試 | `backend/tests/test_community_contract.py`、`backend/tests/test_community_schema.py` |
+| 拍攝時間、發布時檢查、EXPIRED、積分、等級、初審判定、值驗證 | `backend/app/domain/community.py` |
+| EXIF 擷取 | `backend/app/services/photos.py` |
+| 案件與管理員服務、冪等 | `backend/app/services/community_cases.py`、`backend/app/services/idempotency.py` |
+| 路由與 wire schema | `backend/app/routers/community_cases.py`、`backend/app/schemas/community_cases.py` |
+| 測試 | `backend/tests/test_community_contract.py`、`test_community_schema.py`、`test_community_precheck.py`、`test_community_cases_api.py` |

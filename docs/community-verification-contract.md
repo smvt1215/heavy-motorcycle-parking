@@ -47,6 +47,7 @@
 - `published_until` 為 NULL（`VERIFIED_SOURCE`）時沒有觀察期限。
 
 DB 約束：
+
 - `UNPUBLISHED` 時 `publication_basis`、`first_published_at`、`published_until` 都必須是 NULL；其他狀態必須有 basis 與首次發布時間。
 - `COMMUNITY_CORROBORATED` 與 `MANUAL_REVIEW` 的期限固定為首次發布起 90 天；`VERIFIED_SOURCE` 的 `published_until` 必須是 NULL，不會被推導成 `EXPIRED`（`ck_community_cases_observation_term_90_days`）。`first_published_at` 只寫一次，暫停後恢復不重設期限。
 - `PUBLISHED` 必須是 `ACCEPTED`。被異議暫停時，審查狀態可回到 `MANUAL_REVIEW`，發布狀態為 `SUSPENDED`。
@@ -82,11 +83,13 @@ DB 約束：
 ## 4. 來源核實與正規化
 
 `source_verifications` 記錄管理員核實過的來源：
+
 - **基本欄位**：`data_sources` 的來源、可確認的 `fact_kind`（`PERMISSION`／`RATE`／`REALTIME`／`ENTRANCE`／`FACILITY`），以及範圍（`parking_id` 為 NULL 代表該來源自己發布的所有場站；`zone_id` 為 NULL 代表全場）。
 - **證據 URL**：必須是 HTTPS。
 - **核實資訊**：核實者、核實時間、撤銷時間。
 
 規則：
+
 - 只有 `PERMISSION` 帶 `rule_kind` 與 `authority_priority`，其他類型這兩欄必須是 NULL。審查人在案件決定中**不能**提高層級或權威，只能使用這份設定。
 - `parser_code` 與 `parser_config_version` 要同時存在或同時為 NULL。NULL 代表沒有實作解析器，只能走人工。人工採納不會把格式加入解析器。
 - `REALTIME` 只用於官方或營運商的即時來源；公告與照片不能確認即時空位。
@@ -98,6 +101,7 @@ DB 約束：
 ### 5.1 擷取
 
 後端在轉正、縮放、重新編碼與移除 metadata **之前**讀取 EXIF `DateTimeOriginal`、`OffsetTimeOriginal`，有的話也讀 `SubSecTimeOriginal`，交給 `classify_photo_time` 判定。資料庫只保存：
+
 - 這三個欄位的原始字串；
 - 解析出的 UTC 時間 `captured_at`；
 - `time_status`、`time_parser_version`（目前為 `exif-time-1`）；
@@ -149,7 +153,8 @@ DB 約束：
 | `SOURCE_CONFLICT` | 與現有來源事實或同層規則衝突 |
 | `PUBLICATION_ELIGIBILITY` | 最終是否可自動發布 |
 
-  結果為 `PASS`、`FAIL` 或 `NEEDS_MANUAL`；不是 `PASS` 的項目必須附 `reason_code`。不使用 AI 信心分數。
+結果為 `PASS`、`FAIL` 或 `NEEDS_MANUAL`；不是 `PASS` 的項目必須附 `reason_code`。不使用 AI 信心分數。
+
 - **時間軸**：`community_case_events` 不可修改。`MANUAL_ACCEPTED`、`MANUAL_REJECTED`、`EVIDENCE_REQUESTED`、`SUPERSEDED` 必須記錄操作的管理員、原因代碼和原因文字。`actor_participant_id` 為 NULL 代表系統操作。
 - **人工採納**：缺 metadata 的照片被人工採納後，`time_status` 仍然不是 `VALID`，也不回填成自動補證的票數。
 
@@ -169,6 +174,7 @@ DB 約束：
 `FREEZE`、`UNFREEZE`、`REVOKE` 必須指向同一案件、同一參與者的 `AWARD`（複合外鍵加上 INSERT trigger 檢查）。
 
 `reason` 有三種：
+
 - `ORIGINAL_REPORT`：原回報被採納。
 - `CORROBORATION`：補證被採納，必須是在採納前、或在有效發布期間提交並經確認有效。
 - `UPHELD_OBJECTION`：異議經人工認定成立，於 #32 決定給分。
@@ -220,6 +226,7 @@ DB 約束：
   },
   "counts_toward_corroboration": false,
   "message_code": "MANUAL_REVIEW_REQUIRED"
+
 }
 ```
 
@@ -238,12 +245,14 @@ DB 約束：
   "first_published_at": "2026-10-10T04:00:00Z",
   "published_until": "2027-01-08T04:00:00Z",
   "label": "社群核實位置・通行性未確認"
+
 }
 ```
 
 `label` 只在 `ENTRANCE_LOCATION` 出現：社群核實時為「社群核實位置・通行性未確認」，人工採納時為「人工複審採納位置・通行性未確認」，其他類型為 null。入口觀察不影響預設導航，導航仍優先已確認 ALLOWED 的入口。`corroborator_count` 只在 `COMMUNITY_CORROBORATED` 時有值，其他情況為 null。
 
 新增錯誤代碼：
+
 - `409 VERSION_CONFLICT`
 - `422 IDEMPOTENCY_KEY_REUSED`
 - `428 IDEMPOTENCY_KEY_REQUIRED`

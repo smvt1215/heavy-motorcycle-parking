@@ -49,7 +49,7 @@ from app.schemas.community_cases import (
 from app.schemas.error import ErrorResponse
 from app.services.community_cases import CaseDetail, CaseView, CommunityCaseService, ModerationService, PhotoView
 from app.services.idempotency import IdempotencyService, unit_of_work
-from app.services.storage_outbox import drain
+from app.services.storage_outbox import drain, forget_uploaded_object
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -258,7 +258,15 @@ async def upload_case_photo(
 ):
     data = await file.read(settings.report_photo_max_bytes + 1)
     now = request.state.received_at
-    view = await unit_of_work(session, lambda: cases.add_photo(user, now, case_id, owner, data))
+    try:
+        view = await unit_of_work(session, lambda: cases.add_photo(user, now, case_id, owner, data))
+    except BaseException:
+        # The object may already be stored while its row was rolled back (failed commit or
+        # cancellation). Remove it, or record it durably for `app.services.storage_outbox`.
+        uploaded = getattr(cases, "uncommitted_upload_key", None)
+        if uploaded is not None:
+            await forget_uploaded_object(session, request.app.state.object_storage, uploaded, now)
+        raise
     photo = view.photo
     return PhotoUploadResponse(
         photo_id=photo.id,

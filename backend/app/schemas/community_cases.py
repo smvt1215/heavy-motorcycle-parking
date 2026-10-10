@@ -153,7 +153,12 @@ class PhotoUploadResponse(WireModel):
     metadata_time: MetadataTime
     counts_toward_corroboration: bool
     message_code: Literal[
-        "ELIGIBLE", "MANUAL_REVIEW_REQUIRED", "DUPLICATE_EVIDENCE", "OUTSIDE_PUBLICATION_WINDOW", "DELETED"
+        "ELIGIBLE",
+        "MANUAL_REVIEW_REQUIRED",
+        "DUPLICATE_EVIDENCE",
+        "OUTSIDE_PUBLICATION_WINDOW",
+        "NOT_COUNTED",
+        "DELETED",
     ]
 
 

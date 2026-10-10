@@ -215,6 +215,11 @@ class CaseInput:
     publication_basis: PublicationBasis | None
     published_until: datetime | None
     auto_publish_enabled: bool
+    # Photos of withdrawn/invalidated stances and earlier revisions: they never vote,
+    # but their hashes still reserve the image for duplicate detection.
+    inactive_photos: tuple[EvidencePhoto, ...] = ()
+    # Values of other live published observations for the same lot, zone and fact.
+    published_values: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -232,22 +237,24 @@ class PrecheckReport:
     results: tuple[CheckResult, ...]
     supporters: tuple[int, ...]
     objectors: tuple[int, ...]
+    # Photos that actually counted as independent evidence in this evaluation.
+    counted_photo_ids: tuple[int, ...] = ()
 
 
-def _counted(photos, seen: set[str], counts) -> tuple[int, int]:
-    """(counted, duplicates). A photo counts once per case by normalized SHA-256.
-
-    Every stored hash is reserved in order, including deleted and ineligible
-    photos, so a later copy of the same image never becomes independent evidence.
-    """
+def _counted(photos, first_copy: dict[str, int], counts, counted_ids: list[int]) -> tuple[int, int]:
+    """(counted, duplicates). Only the first stored copy of an image (lowest photo ID in
+    the case, including deleted, ineligible and inactive photos) can count, so a later
+    copy of the same image never becomes independent evidence, whatever its owner."""
     counted = duplicates = 0
     for photo in photos:
         eligible = not photo.deleted and counts(photo)
-        if photo.sha256 in seen:
-            duplicates += int(eligible)
+        if not eligible:
             continue
-        seen.add(photo.sha256)
-        counted += int(eligible)
+        if first_copy[photo.sha256] != photo.photo_id:
+            duplicates += 1
+            continue
+        counted += 1
+        counted_ids.append(photo.photo_id)
     return counted, duplicates
 
 
@@ -281,8 +288,16 @@ def evaluate_case(case: CaseInput, now: datetime) -> PrecheckReport:
     add(PrecheckCode.REQUIRED_FIELDS, PrecheckOutcome.PASS)
     add(PrecheckCode.SCOPE, PrecheckOutcome.PASS)
 
-    seen: set[str] = set()
-    original, duplicates = _counted(case.original_photos, seen, counts)
+    first_copy: dict[str, int] = {}
+    every_photo = (
+        *case.original_photos,
+        *(photo for stance in case.stances for photo in stance.photos),
+        *case.inactive_photos,
+    )
+    for photo in sorted(every_photo, key=lambda item: item.photo_id):
+        first_copy.setdefault(photo.sha256, photo.photo_id)
+    counted_ids: list[int] = []
+    original, duplicates = _counted(case.original_photos, first_copy, counts, counted_ids)
     supporters: list[int] = []
     objectors: list[int] = []
     for stance in case.stances:
@@ -290,7 +305,7 @@ def evaluate_case(case: CaseInput, now: datetime) -> PrecheckReport:
             continue
         if stance.stance == CaseStance.CANNOT_CONFIRM:
             continue
-        counted, dup = _counted(stance.photos, seen, counts)
+        counted, dup = _counted(stance.photos, first_copy, counts, counted_ids)
         duplicates += dup
         if not counted:
             continue
@@ -327,9 +342,21 @@ def evaluate_case(case: CaseInput, now: datetime) -> PrecheckReport:
             "INSUFFICIENT_CORROBORATION",
             {"supporters": len(supporters), "required": CORROBORATION_THRESHOLD},
         )
+    conflicting = [value for value in case.published_values if value != case.proposed_value]
     if objectors:
         add(
             PrecheckCode.SOURCE_CONFLICT, PrecheckOutcome.NEEDS_MANUAL, "VALID_OBJECTION", {"objectors": len(objectors)}
+        )
+    elif not case.low_risk:
+        # Source-backed rules, rates and entrances are resolved by their own engine; this
+        # check does not compare against them, so it never reports a pass for these facts.
+        add(PrecheckCode.SOURCE_CONFLICT, PrecheckOutcome.NEEDS_MANUAL, "EXISTING_FACTS_NOT_COMPARED")
+    elif conflicting:
+        add(
+            PrecheckCode.SOURCE_CONFLICT,
+            PrecheckOutcome.NEEDS_MANUAL,
+            "CONFLICTS_WITH_PUBLISHED_OBSERVATION",
+            {"conflicting": len(conflicting)},
         )
     else:
         add(PrecheckCode.SOURCE_CONFLICT, PrecheckOutcome.PASS)
@@ -351,7 +378,12 @@ def evaluate_case(case: CaseInput, now: datetime) -> PrecheckReport:
         else PrecheckOutcome.PASS
     )
     return PrecheckReport(
-        outcome, _decide(case, now, results, supporters, objectors), tuple(results), tuple(supporters), tuple(objectors)
+        outcome,
+        _decide(case, now, results, supporters, objectors),
+        tuple(results),
+        tuple(supporters),
+        tuple(objectors),
+        tuple(sorted(counted_ids)),
     )
 
 

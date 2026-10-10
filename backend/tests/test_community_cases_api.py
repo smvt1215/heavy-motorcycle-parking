@@ -923,3 +923,90 @@ async def test_failed_request_with_a_completed_key_replays_the_stored_result(env
     assert retry.status_code == 201 and retry.json() == first.json()
     fresh = await env["client"].post("/api/v1/community/cases", json=payload, headers=auth(env, "alice", "new-key"))
     assert fresh.status_code == 403 and fresh.json()["error"]["code"] == "PARTICIPANT_SUSPENDED"
+
+
+# --- third review round (PR #43) ---------------------------------------------------------------
+
+
+async def test_manual_resume_below_threshold_is_relabelled_as_manual_review(env):
+    case = await published_case(env)
+    await env["client"].delete(f"/api/v1/community/cases/{case['id']}/stance", headers=auth(env, "bob", key()))
+    resumed = await decide(env, case["id"], "ACCEPT")
+    assert resumed["publication_status"] == "PUBLISHED" and resumed["publication_basis"] == "MANUAL_REVIEW"
+    (item,) = await observations(env)
+    assert item["publication_basis"] == "MANUAL_REVIEW" and item["corroborator_count"] is None
+
+
+async def test_upload_whose_commit_fails_leaves_no_orphaned_object(env, monkeypatch):
+    case = await create(env)
+    storage = env["app"].state.object_storage
+    session = env["session"]
+    real_commit = session.commit
+
+    async def failing_commit():
+        raise RuntimeError("commit lost")
+
+    monkeypatch.setattr(session, "commit", failing_commit)
+    with pytest.raises(RuntimeError):
+        await env["client"].post(
+            f"/api/v1/community/cases/{case['id']}/photos",
+            files={"file": ("p.jpg", jpeg(), "image/jpeg")},
+            data={"owner": "revision"},
+            headers=auth(env, "alice"),
+        )
+    monkeypatch.setattr(session, "commit", real_commit)
+    assert storage.objects == {}
+
+
+async def test_inactive_stance_photos_still_reserve_the_image(env):
+    case = await create(env)
+    await upload(env, case["id"], "alice", "revision")
+    image = jpeg()
+    await support(env, case["id"], "bob", image)
+    await env["client"].delete(f"/api/v1/community/cases/{case['id']}/stance", headers=auth(env, "bob", key()))
+    again = await support(env, case["id"], "carol", image)
+    assert again["counts_toward_corroboration"] is False and again["message_code"] == "DUPLICATE_EVIDENCE"
+    withdrawn = (await detail(env, case["id"], "bob"))["my_photos"][0]
+    assert withdrawn["counts_toward_corroboration"] is False and withdrawn["message_code"] == "NOT_COUNTED"
+
+
+async def test_conflicting_live_observation_sends_new_case_to_manual_review(env):
+    await published_case(env)
+    other = await create(env, proposed_value={"present": False})
+    await upload(env, other["id"], "alice", "revision")
+    for name in ("bob", "carol", "dave"):
+        await support(env, other["id"], name, observed={"present": False})
+    summary = (await detail(env, other["id"]))["case"]
+    assert summary["publication_status"] == "UNPUBLISHED" and summary["review_status"] == "MANUAL_REVIEW"
+    reasons = {r["check_code"]: r["reason_code"] for r in (await moderation(env, other["id"]))["precheck"]["results"]}
+    assert reasons["SOURCE_CONFLICT"] == "CONFLICTS_WITH_PUBLISHED_OBSERVATION"
+
+
+async def test_superseding_a_suspended_observation_restores_frozen_points(env):
+    case = await published_case(env)
+    await support(env, case["id"], "erin", value="OPPOSE", observed={"present": False})
+    assert (await points(env, "alice"))["points"] == 0  # frozen while suspended
+    successor = await create(env)
+    await decide(env, case["id"], "SUPERSEDE", superseded_by_case_id=successor["id"])
+    assert (await points(env, "alice"))["points"] == 1
+
+
+async def test_supporter_whose_later_objection_is_upheld_keeps_one_point(env):
+    case = await published_case(env)
+    await support(env, case["id"], "erin")
+    assert (await points(env, "erin"))["points"] == 1
+    await support(env, case["id"], "erin", value="OPPOSE", observed={"present": False})
+    await decide(env, case["id"], "REJECT")
+    assert (await points(env, "erin"))["points"] == 1
+    assert (await points(env, "bob"))["points"] == 0
+
+
+async def test_suspension_is_refused_when_it_would_recount_the_moderators_case(env):
+    case = await published_case(env)
+    await stance(env, case["id"], "mod2", "CANNOT_CONFIRM")
+    bob = (await moderation(env, case["id"]))["stances"][0]["participant_id"]
+    response = await env["client"].put(
+        f"/api/v1/moderation/participants/{bob}/suspension", json={"reason_code": "ABUSE"}, headers=auth(env, "mod2")
+    )
+    assert response.status_code == 403 and response.json()["error"]["code"] == "CONFLICT_OF_INTEREST"
+    assert (await detail(env, case["id"]))["case"]["publication_status"] == "PUBLISHED"

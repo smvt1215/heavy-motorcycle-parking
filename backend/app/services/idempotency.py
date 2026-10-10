@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,6 +75,13 @@ class IdempotencyService:
                 "IDEMPOTENCY_KEY_INVALID", "Idempotency-Key must be 1-128 visible ASCII characters.", 422
             )
         digest = request_digest(payload)
+        # Serialize requests that share a key: the lock is held until this transaction ends,
+        # so a concurrent duplicate waits, then replays instead of running the guard (rate
+        # limit) or the handler a second time.
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+            {"scope": f"idempotency:{user_id}:{operation}:{key}"},
+        )
         stored = await self._stored(user_id, operation, key, digest, now)
         if stored is not None:
             return stored

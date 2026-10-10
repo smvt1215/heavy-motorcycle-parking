@@ -45,6 +45,22 @@ async def drain(session: AsyncSession, storage: ObjectStorage | None, now: datet
     return completed, len(rows) - completed
 
 
+async def forget_uploaded_object(session: AsyncSession, storage: ObjectStorage | None, key: str, now: datetime):
+    """An upload whose database commit failed: delete it now, or leave a pending outbox row."""
+    try:
+        if storage is not None:
+            await storage.delete(key)
+            return
+    except Exception as exc:  # noqa: BLE001 - fall through to the durable record
+        logger.warning("Orphaned upload cleanup failed: %s", type(exc).__name__)
+    try:
+        await session.rollback()
+        session.add(StorageDeletion(storage_key=key, requested_at=now, created_at=now, last_error="UPLOAD_UNCOMMITTED"))
+        await session.commit()
+    except Exception as exc:  # noqa: BLE001 - nothing else can be done without a database
+        logger.error("Could not record orphaned upload for deletion: %s", type(exc).__name__)
+
+
 async def _main() -> None:
     from app.config import settings
     from app.db import get_db_engine, get_sessionmaker

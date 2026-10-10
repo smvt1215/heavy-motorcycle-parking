@@ -18,8 +18,10 @@ RECENT = NOW - timedelta(days=1)
 VALUE = {"present": True}
 
 
-def photo(n, *, status=Time.VALID, captured=RECENT, deleted=False):
-    return EvidencePhoto(n, f"{n:064x}", status, captured if status != Time.MISSING else None, deleted)
+def photo(n, *, status=Time.VALID, captured=RECENT, deleted=False, copy=0):
+    """Image `n`; `copy` > 0 is another stored row (new ID) of the same image bytes."""
+    photo_id = n + 1000 * copy
+    return EvidencePhoto(photo_id, f"{n:064x}", status, captured if status != Time.MISSING else None, deleted)
 
 
 def support(participant, *photos, stance=Stance.SUPPORT, value=VALUE, suspended=False):
@@ -67,9 +69,9 @@ def test_fewer_than_three_supporters_wait_for_corroboration():
         # The author's own support never counts.
         (support(1), support(2), support(3)),
         # Duplicate image hashes count once per case.
-        (support(2, photo(7)), support(3, photo(7)), support(4)),
+        (support(2, photo(7)), support(3, photo(7, copy=1)), support(4)),
         # Re-using the original's image is not independent evidence.
-        (support(2, photo(1)), support(3), support(4)),
+        (support(2, photo(1, copy=1)), support(3), support(4)),
         # Suspended participants do not count.
         (support(2, suspended=True), support(3), support(4)),
         # Stale, missing, timezone-unknown or deleted evidence does not count.
@@ -175,10 +177,10 @@ def test_support_counts_only_for_the_proposed_value():
 
 def test_deleted_or_ineligible_hashes_still_reserve_the_image():
     deleted_original = (photo(7, deleted=True), photo(1))
-    stances = (support(2, photo(7)), support(3), support(4))
+    stances = (support(2, photo(7, copy=1)), support(3), support(4))
     assert evaluate_case(case(*stances, original=deleted_original), NOW).decision == Decision.AWAIT
     ineligible = (photo(1), photo(8, status=Time.MISSING))
-    stances = (support(2, photo(8)), support(3), support(4))
+    stances = (support(2, photo(8, copy=1)), support(3), support(4))
     assert evaluate_case(case(*stances, original=ineligible), NOW).decision == Decision.AWAIT
 
 
@@ -196,3 +198,31 @@ def test_suspended_author_takes_a_live_observation_back_to_review():
     assert evaluate_case(suspended, NOW).decision == Decision.SUSPEND
     manual = replace(published(*three[:1], basis=Basis.MANUAL_REVIEW), author_suspended=True)
     assert evaluate_case(manual, NOW).decision == Decision.SUSPEND
+
+
+def test_inactive_owner_photos_reserve_hashes_but_never_vote():
+    withdrawn_copy = photo(7)
+    later = (support(2, EvidencePhoto(20, withdrawn_copy.sha256, Time.VALID, RECENT)), support(3), support(4))
+    report = evaluate_case(replace(case(*later), inactive_photos=(withdrawn_copy,)), NOW)
+    assert report.decision == Decision.AWAIT and 20 not in report.counted_photo_ids
+    # The first stored copy wins regardless of which owner is evaluated first.
+    first = (support(2, photo(30)), support(3), support(4))
+    stale = EvidencePhoto(40, photo(30).sha256, Time.VALID, RECENT)
+    report = evaluate_case(replace(case(*first), inactive_photos=(stale,)), NOW)
+    assert report.decision == Decision.PUBLISH and 30 in report.counted_photo_ids
+
+
+def test_counted_photo_ids_report_actual_evidence():
+    report = evaluate_case(case(support(2), support(3, photo(1, copy=1))), NOW)
+    assert report.counted_photo_ids == (1, 102)
+
+
+def test_conflicting_published_observation_and_unchecked_sources_go_to_manual():
+    three = (support(2), support(3), support(4))
+    conflict = evaluate_case(replace(case(*three), published_values=({"present": False},)), NOW)
+    assert conflict.decision == Decision.MANUAL
+    assert outcome(conflict, Code.SOURCE_CONFLICT).reason_code == "CONFLICTS_WITH_PUBLISHED_OBSERVATION"
+    same = evaluate_case(replace(case(*three), published_values=(VALUE,)), NOW)
+    assert same.decision == Decision.PUBLISH
+    source = evaluate_case(case(*three, low=False), NOW)
+    assert outcome(source, Code.SOURCE_CONFLICT).reason_code == "EXISTING_FACTS_NOT_COMPARED"

@@ -300,7 +300,6 @@ class CommunityCaseService:
         time = classify_photo_time(
             exif.raw_datetime_original, exif.raw_offset_time_original, exif.raw_subsec_time_original, now
         )
-        duplicate = any(p.normalized_sha256 == processed.sha256 for p in await self.repo.photos(row.id))
         key = f"community/{row.id}/{uuid.uuid4().hex}.jpg"
         await self.storage.put(key, processed.body, processed.content_type)
         try:
@@ -325,14 +324,15 @@ class CommunityCaseService:
                     **values,
                 )
             )
-            await self._precheck(row, now)
+            report = await self._precheck(row, now)
         except Exception:
             with contextlib.suppress(Exception):
                 await self.storage.delete(key)
             raise
-        eligible = time.status == PhotoTimeStatus.VALID and not duplicate
-        message = "ELIGIBLE" if eligible else "DUPLICATE_EVIDENCE" if duplicate else "MANUAL_REVIEW_REQUIRED"
-        return PhotoView(photo, eligible, message)
+        # The caller commits; until then this object is not durably referenced. The router
+        # removes it (or records it for removal) if that commit fails.
+        self.uncommitted_upload_key = key
+        return self._photo_view(photo, now, row, report, await self.repo.photos(row.id))
 
     async def set_stance(
         self, principal: AuthenticatedUser, now: datetime, case_id: int, stance: CaseStance, observed_value
@@ -400,11 +400,13 @@ class CommunityCaseService:
             raise case_not_found()
         if participant is None or not await self.repo.is_participant(row.id, participant.id):
             raise forbidden()
-        photos = [photo for photo in await self.repo.photos(row.id) if photo.participant_id == participant.id]
+        every_photo = await self.repo.photos(row.id)
+        report = await self._evaluate(row, now)
+        photos = [photo for photo in every_photo if photo.participant_id == participant.id]
         return CaseDetail(
             view=await self._stored_view(row, now),
             revisions=await self.repo.revisions(row.id),
-            photos=[self._photo_view(photo, now, row) for photo in photos],
+            photos=[self._photo_view(photo, now, row, report, every_photo) for photo in photos],
             events=await self.repo.events(row.id),
             my_stance=await self.repo.active_stance(row.id, participant.id),
             viewer_participant_id=participant.id,
@@ -458,6 +460,18 @@ class CommunityCaseService:
                 for p in items
             )
 
+        active_stance_ids = {s.id for s in stances}
+        inactive = evidence(
+            p
+            for p in photos
+            if (p.revision_id is not None and p.revision_id != revision.id)
+            or (p.stance_id is not None and p.stance_id not in active_stance_ids)
+        )
+        published_values = []
+        for other in await self.repo.published_for_parking(row.parking_id, now):
+            if other.id != row.id and other.fact_type == row.fact_type and other.zone_id == row.zone_id:
+                published_values.append((await self.repo.revision(other.id, other.current_revision)).proposed_value)
+
         return evaluate_case(
             CaseInput(
                 low_risk=row.fact_type in LOW_RISK_FACT_TYPES,
@@ -480,6 +494,8 @@ class CommunityCaseService:
                 publication_basis=row.publication_basis,
                 published_until=row.published_until,
                 auto_publish_enabled=self.auto_publish_enabled,
+                inactive_photos=inactive,
+                published_values=tuple(published_values),
             ),
             now,
         )
@@ -604,10 +620,16 @@ class CommunityCaseService:
             if frozen and not revoked:
                 await self._mark(award, ContributionEntryType.UNFREEZE, now)
 
-    async def _revoke(self, row: CommunityCase, now: datetime, keep: set[ContributionReason] = frozenset()):
-        for award, _frozen, revoked in await self._award_markers(row):
-            if not revoked and award.reason not in keep:
-                await self._mark(award, ContributionEntryType.REVOKE, now)
+    async def _revoke(self, row: CommunityCase, now: datetime, keep_participants: frozenset[int] = frozenset()):
+        """Revoke awards on the case; participants in `keep_participants` keep theirs (unfrozen)."""
+        for award, frozen, revoked in await self._award_markers(row):
+            if revoked:
+                continue
+            if award.participant_id in keep_participants:
+                if frozen:
+                    await self._mark(award, ContributionEntryType.UNFREEZE, now)
+                continue
+            await self._mark(award, ContributionEntryType.REVOKE, now)
 
     async def _event(
         self,
@@ -663,17 +685,31 @@ class CommunityCaseService:
                 return int(result.detail.get("supporters", 0))
         return None
 
-    def _photo_view(self, photo: CommunityEvidencePhoto, now: datetime, row: CommunityCase) -> PhotoView:
-        eligible = photo.deleted_at is None and photo.time_status == PhotoTimeStatus.VALID
+    def _photo_view(
+        self,
+        photo: CommunityEvidencePhoto,
+        now: datetime,
+        row: CommunityCase,
+        report: PrecheckReport,
+        photos: list[CommunityEvidencePhoto],
+    ) -> PhotoView:
+        """Mirror the precheck exactly: `counts_toward_corroboration` is whether this photo
+        counted in the current evaluation; the message explains why it did not."""
+        if photo.id in report.counted_photo_ids:
+            return PhotoView(photo, True, "ELIGIBLE")
         if photo.deleted_at is not None:
             return PhotoView(photo, False, "DELETED")
-        if not eligible:
+        if photo.time_status != PhotoTimeStatus.VALID:
             return PhotoView(photo, False, "MANUAL_REVIEW_REQUIRED")
-        if row.publication_state != CasePublicationState.UNPUBLISHED:
-            # Mirrors precheck: once published, natural ageing never revokes eligibility.
-            return PhotoView(photo, True, "ELIGIBLE")
-        within = counts_at_publication(photo.time_status, photo.captured_at, now)
-        return PhotoView(photo, within, "ELIGIBLE" if within else "OUTSIDE_PUBLICATION_WINDOW")
+        if any(other.normalized_sha256 == photo.normalized_sha256 and other.id < photo.id for other in photos):
+            return PhotoView(photo, False, "DUPLICATE_EVIDENCE")
+        if row.publication_state == CasePublicationState.UNPUBLISHED and not counts_at_publication(
+            photo.time_status, photo.captured_at, now
+        ):
+            return PhotoView(photo, False, "OUTSIDE_PUBLICATION_WINDOW")
+        # Valid evidence whose owner does not vote (earlier revision, withdrawn, author or
+        # suspended participant, CANNOT_CONFIRM, or support for another value).
+        return PhotoView(photo, False, "NOT_COUNTED")
 
 
 class ModerationService(CommunityCaseService):
@@ -709,10 +745,11 @@ class ModerationService(CommunityCaseService):
             raise case_not_found()
         recused = await self.repo.is_participant(row.id, moderator.id)
         report = await self._evaluate(row, now)
+        every_photo = await self.repo.photos(row.id)
         return CaseDetail(
             view=await self._stored_view(row, now),
             revisions=await self.repo.revisions(row.id),
-            photos=[self._photo_view(photo, now, row) for photo in await self.repo.photos(row.id)],
+            photos=[self._photo_view(photo, now, row, report, every_photo) for photo in every_photo],
             events=await self.repo.events(row.id),
             my_stance=None,
             stances=await self.repo.stances(row.id),
@@ -773,6 +810,12 @@ class ModerationService(CommunityCaseService):
                     await self._event(row, now, CaseEventType.STANCE_INVALIDATED, moderator.id)
             await self.session.flush()
             if row.publication_state == CasePublicationState.SUSPENDED:
+                if (
+                    row.publication_basis == PublicationBasis.COMMUNITY_CORROBORATED
+                    and len(report.supporters) < CORROBORATION_THRESHOLD
+                ):
+                    # No longer a 3-person corroboration: the moderator is adopting it.
+                    row.publication_basis = PublicationBasis.MANUAL_REVIEW
                 row.publication_state = CasePublicationState.PUBLISHED
                 row.review_status = CaseReviewStatus.ACCEPTED
                 await self._unfreeze(row, now)
@@ -788,10 +831,13 @@ class ModerationService(CommunityCaseService):
             row.review_status = CaseReviewStatus.REJECTED
             await self._event(row, now, CaseEventType.MANUAL_REJECTED, moderator.id, **reason)
             if was_published:
-                await self._revoke(row, now)
+                # An objection that exposed a published error is upheld and earns one point. A
+                # supporter who later objected keeps the award already earned (one per case) instead
+                # of losing it to the revocation.
+                upheld = frozenset(report.objectors)
+                await self._revoke(row, now, keep_participants=upheld)
                 await self._event(row, now, CaseEventType.WITHDRAWN, moderator.id)
-                # An objection that exposed a published error is upheld and earns a point.
-                for participant_id in report.objectors:
+                for participant_id in upheld:
                     await self._award(row, participant_id, ContributionReason.UPHELD_OBJECTION, now)
         elif decision == "REQUEST_EVIDENCE":
             if row.publication_state != CasePublicationState.UNPUBLISHED:
@@ -803,6 +849,7 @@ class ModerationService(CommunityCaseService):
             if successor is None or successor.id == row.id or successor.parking_id != row.parking_id:
                 raise invalid("SUCCESSOR_INVALID", "Supersede needs another existing case for the same parking lot.")
             was_published = row.publication_state != CasePublicationState.UNPUBLISHED
+            was_suspended = row.publication_state == CasePublicationState.SUSPENDED
             if was_published:
                 row.publication_state = CasePublicationState.WITHDRAWN
                 row.withdrawn_at = now
@@ -813,6 +860,9 @@ class ModerationService(CommunityCaseService):
             )
             if was_published:
                 await self._event(row, now, CaseEventType.WITHDRAWN, moderator.id)
+            if was_suspended:
+                # Replacement is not invalidation: points frozen by the suspension are restored.
+                await self._unfreeze(row, now)
         else:  # pragma: no cover - the schema restricts decisions
             raise invalid("INVALID_DECISION", "Unknown decision.")
         row.version += 1
@@ -883,12 +933,22 @@ class ModerationService(CommunityCaseService):
             raise not_found("PARTICIPANT_NOT_FOUND", "The participant was not found.")
         if target.id == moderator.id:
             raise invalid("SELF_SUSPENSION", "Moderators cannot change their own suspension.")
+        affected = await self.repo.cases_to_recount_for(target.id)
+        for case_id in affected:
+            # Suspension recounts these cases; a moderator who took part in one must not
+            # change its outcome this way. Another moderator has to act.
+            if await self.repo.is_participant(case_id, moderator.id):
+                raise DiscoveryError(
+                    "CONFLICT_OF_INTEREST",
+                    f"You took part in case {case_id}, which this suspension would recount.",
+                    403,
+                )
         target.suspended_at = now if reason_code else None
         target.suspended_reason = reason_code
         await self.session.flush()
         # Their stances stop (or resume) counting and their own live observations go back to
         # review; recount open cases they authored or stand on, locking in ascending ID order.
-        for case_id in await self.repo.cases_to_recount_for(target.id):
+        for case_id in affected:
             await self._precheck(await self._locked_case(case_id), now)
         return target
 

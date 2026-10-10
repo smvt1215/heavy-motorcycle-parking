@@ -163,14 +163,14 @@ migration 新增來源核實、案件版本、初審、補證、社群觀察、�
 
 | 順序 | 功能 issue | 交付 |
 | --- | --- | --- |
-| 1 | 規格與模型 | 更新產品／API／DB文件與 ADR、狀態對照、來源配置、metadata／初審契約及 migration |
-| 2 | 雙北資料 | 官方字典、路邊範圍、場站對應、營運商來源核實及真實 fixture |
-| 3 | 社群後端 | 初審、補證、發布／異議／複審、積分及預設關閉開關 |
-| 4 | 手機 | 共用 Dart package、metadata 保留、回報／補證／貢獻與找位資訊 |
-| 5 | Web工作台 | 獨立 Flutter 專案、同源代理、私人證據與疑義操作 |
-| 6 | 整合驗收 | 隔離環境、HTTPS、資料重播、實機操作及阻塞修復 |
+| 1 | [#32](https://github.com/smvt1215/heavy-motorcycle-parking/issues/32) 規格與模型 | 更新產品／API／DB文件與 ADR、狀態對照、來源配置、metadata／初審契約及 migration |
+| 2 | [#33](https://github.com/smvt1215/heavy-motorcycle-parking/issues/33) 雙北資料 | 官方字典、路邊範圍、場站對應、營運商來源核實及真實 fixture |
+| 3 | [#34](https://github.com/smvt1215/heavy-motorcycle-parking/issues/34) 社群後端 | 初審、補證、發布／異議／複審、積分及預設關閉開關 |
+| 4 | [#35](https://github.com/smvt1215/heavy-motorcycle-parking/issues/35) 手機 | 共用 Dart package、metadata 保留、回報／補證／貢獻與找位資訊 |
+| 5 | [#36](https://github.com/smvt1215/heavy-motorcycle-parking/issues/36) Web工作台 | 獨立 Flutter 專案、同源代理、私人證據與疑義操作 |
+| 6 | [#37](https://github.com/smvt1215/heavy-motorcycle-parking/issues/37) 整合驗收 | 隔離環境、HTTPS、資料重播、實機操作及阻塞修復 |
 
-每個功能 issue 建立時更新文件追蹤連結；此文件 issue 不冒充以上六項已完成，不一次建立所有功能 PR。
+功能 issue 已於2026-10-10建立（#32–#37）；此文件 issue 不冒充以上六項已完成，不一次建立所有功能 PR。
 
 ## 8. 驗證、Claude 審查處理與結案
 

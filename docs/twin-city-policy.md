@@ -12,7 +12,7 @@
 
 `app/ingestion/policies.py` 保存政策代碼、來源 URL、發布日期、生效時間、範圍和明確配置的 authority priority 200。規則沿用既有優先序：區域 > 全場、EXCEPTION > BASELINE、authority priority，最高同層的衝突／未知仍為 UNKNOWN。原始資料 baseline priority 100 不會取代政策，區域特殊禁停 EXCEPTION 仍可覆蓋政策。
 
-政策許可、費率、即時及入口各用自己的 source_id。政策 scope evidence 保存在 parking_rules.notes JSON；費率原文及 scope evidence 保存在 parking_rate_sources.raw_payload。選車種 API 的各自 provenance 提供來源名稱及 URL；手機可開啟來源原文。
+政策許可、費率、即時及入口各用自己的 source_id。政策 scope evidence 保存在 parking_rules.notes JSON；費率原文及 scope evidence 保存在 parking_rate_sources.raw_payload。選車種 API 的各自 provenance 提供來源名稱及 URL；手機可開啟來源原文。公告僅有發布日期時不猜精確更新時間，未記錄公告接收時間時其 source_updated_at／fetched_at 保持 NULL；發布日期與場站範圍的獨立擷取時間分別保存在證據，不把 feed 的時間代入公告來源。
 
 個別區域的許可與政策費率，起日取政策生效、已核對範圍與首次車格快照擷取時間的最晚者。政策公告日不能證明某個車格在過去已有相同分類、限制或時段。首次範圍時間保存為 scope_verified_from；相同範圍後續匯入不重設起日。
 

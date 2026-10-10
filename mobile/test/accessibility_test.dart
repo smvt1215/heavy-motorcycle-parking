@@ -203,7 +203,7 @@ void main() {
       );
       await controller.selectLot(controller.state.items.first);
       await tester.pumpAndSettle();
-      expect(find.textContaining('停車場整體'), findsOneWidget);
+      expect(find.textContaining('查詢時整體空位'), findsOneWidget);
     },
     variant: platforms,
   );

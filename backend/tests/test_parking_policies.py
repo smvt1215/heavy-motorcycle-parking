@@ -55,7 +55,7 @@ def facts(zone):
 def status(zone, at, vehicle="LARGE_HEAVY", extras=()):
     parking = facts(zone)
     parking = replace(parking, rules=(*parking.rules, *extras))
-    return ParkingCompatibilityService().evaluate(parking, ZoneFacts(1, 1, "MOTO_SHARED"), vehicle, at).status
+    return ParkingCompatibilityService().evaluate(parking, ZoneFacts(1, 1, str(zone.space_type)), vehicle, at).status
 
 
 @pytest.mark.parametrize("city,policy", [("taipei", TAIPEI_ROADSIDE), ("new_taipei", NEW_TAIPEI_ROADSIDE)])
@@ -162,3 +162,23 @@ def test_managed_public_permission_only_on_car_and_never_copies_rate_or_count():
 def test_roadside_scope_cannot_grant_another_zone_category(space_type):
     other = replace(ZONE, space_type=space_type)
     assert apply_roadside_policy(other, SCOPE) == other
+
+
+def test_public_car_grant_does_not_predate_verified_facility_scope():
+    e = next(e for e in MANAGED_FACILITIES["facilities"] if e["external_id"] == "010152")
+    record = dict(
+        ID=e["external_id"],
+        NAME=e["name"],
+        AREA=e["district"],
+        ADDRESS=e["address"],
+        TW97X="297000",
+        TW97Y="2770000",
+        TOTALCAR="314",
+        TOTALMOTOR="0",
+    )
+    (zone,) = NewTaipeiParkingAdapter().normalize_static(record).zones
+    roster_at = datetime.fromisoformat(MANAGED_FACILITIES["roster_published_at"])
+    assert zone.rules[0].effective_from == roster_at
+    assert status(zone, NEW_TAIPEI_PUBLIC_CAR.effective_from) == "UNKNOWN"
+    assert status(zone, roster_at - timedelta(microseconds=1)) == "UNKNOWN"
+    assert status(zone, roster_at) == "ALLOWED"

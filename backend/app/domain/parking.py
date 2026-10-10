@@ -32,6 +32,8 @@ class Provenance:
     source_updated_at: datetime | None = None
     fetched_at: datetime | None = None
     verified_at: datetime | None = None
+    source_name: str | None = None
+    source_url: str | None = None
 
     def __post_init__(self) -> None:
         _integer_id(self.source_id, "source_id")

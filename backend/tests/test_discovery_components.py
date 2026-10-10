@@ -66,6 +66,8 @@ def rate_prov_dict(source_id=7, record=None):
     return {
         "source_id": source_id,
         "source_type": "GOVERNMENT",
+        "source_name": None,
+        "source_url": None,
         "source_record_id": record or f"rate-{source_id}",
         "source_updated_at": "2026-10-01T00:00:00Z",
         "fetched_at": "2026-10-02T01:00:00Z",
@@ -637,6 +639,8 @@ def test_identical_tied_rates_keep_all_evidence():
         {
             "source_id": 9,
             "source_type": "OPERATOR",
+            "source_name": None,
+            "source_url": None,
             "source_record_id": "op-1",
             "source_updated_at": None,
             "fetched_at": None,
@@ -778,6 +782,8 @@ def test_fresh_observation_exact_wire_output():
         "provenance": {
             "source_id": 9,
             "source_type": "OPERATOR",
+            "source_name": None,
+            "source_url": None,
             "source_record_id": "rt-9",
             "source_updated_at": "2026-10-05T02:08:00Z",
             "fetched_at": "2026-10-05T02:09:00Z",
@@ -1430,3 +1436,18 @@ def test_sort_key_orders_confirmed_before_unknown_with_deterministic_ties():
 def test_sort_key_rejects_invalid_items(item):
     with pytest.raises(ValueError):
         sort_key(item)
+
+
+def test_complete_aggregate_keeps_source_name_and_url_without_changing_counts():
+    evidence = Provenance(
+        source_id=9,
+        source_type="OPERATOR",
+        source_record_id="rt-9",
+        fetched_at=NOW,
+        source_name="停車場即時資料",
+        source_url="https://example.com/availability",
+    )
+    summary = aggregate_availability([zone(availability=avail(provenance=evidence))])
+    assert summary["coverage"] == "COMPLETE" and summary["available"] == 8 and summary["total"] == 20
+    (source,) = summary["contributing_sources"]
+    assert source["source_name"] == evidence.source_name and source["source_url"] == evidence.source_url

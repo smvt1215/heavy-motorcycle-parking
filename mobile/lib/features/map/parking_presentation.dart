@@ -89,7 +89,8 @@ String sourceLabel(ParkingSource source) {
     'MANUAL' => '人工確認',
     _ => '來源類型未確認',
   };
-  return '$type #${source.sourceId}${source.sourceRecordId == null ? '' : ' · ${source.sourceRecordId}'}';
+  final name = source.sourceName?.trim();
+  return name == null || name.isEmpty ? '$type（來源名稱未提供）' : '$type · $name';
 }
 
 String taipeiTime(DateTime? instant) {
@@ -102,11 +103,13 @@ String taipeiTime(DateTime? instant) {
 List<ParkingZone> displayDetailZones(
   ParkingDetail detail, {
   required bool includeUnknown,
+  SpaceType? spaceType,
 }) =>
     detail.zones
         .where(
           (zone) =>
-              zone.spaceType.isSearchable &&
+              SpaceType.forVehicle(detail.vehicle).contains(zone.spaceType) &&
+              (spaceType == null || zone.spaceType == spaceType) &&
               zone.compatibility.vehicle == detail.vehicle &&
               (zone.compatibility.status == CompatibilityStatus.allowed ||
                   (includeUnknown &&
@@ -114,3 +117,12 @@ List<ParkingZone> displayDetailZones(
                           CompatibilityStatus.unknown)),
         )
         .toList(growable: false);
+
+String? compatibilityReasonLabel(String? reason) => switch (reason) {
+      'explicit_vehicle_permission' => '依來源的車種停放規則判斷',
+      'conflicting_permissions' => '來源規則有衝突，尚未確認可否停放',
+      'unknown_permission' => '來源尚未確認此車種可否停放',
+      'schedule_unknown' => '適用時段尚未確認',
+      'space_type_default' => '依車格分類判斷',
+      _ => null,
+    };

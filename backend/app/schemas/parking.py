@@ -70,6 +70,8 @@ class Location(WireModel):
 class Source(WireModel):
     source_id: int
     source_type: str | None
+    source_name: str | None = None
+    source_url: str | None = None
     source_record_id: str | None = None
     source_updated_at: datetime | None
     fetched_at: datetime | None

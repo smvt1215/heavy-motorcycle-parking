@@ -223,6 +223,8 @@ class ParkingSource {
   const ParkingSource({
     required this.sourceId,
     required this.sourceType,
+    this.sourceName,
+    this.sourceUrl,
     this.sourceRecordId,
     required this.sourceUpdatedAt,
     required this.fetchedAt,
@@ -232,6 +234,8 @@ class ParkingSource {
   factory ParkingSource.fromJson(Json json) => ParkingSource(
         sourceId: _req<int>(json, 'source_id'),
         sourceType: _req<String?>(json, 'source_type'),
+        sourceName: _opt<String>(json, 'source_name'),
+        sourceUrl: _opt<String>(json, 'source_url'),
         sourceRecordId: _opt<String>(json, 'source_record_id'),
         sourceUpdatedAt: _date(
           _req<Object?>(json, 'source_updated_at'),
@@ -243,6 +247,8 @@ class ParkingSource {
 
   final int sourceId;
   final String? sourceType;
+  final String? sourceName;
+  final String? sourceUrl;
   final String? sourceRecordId;
   final DateTime? sourceUpdatedAt;
   final DateTime? fetchedAt;

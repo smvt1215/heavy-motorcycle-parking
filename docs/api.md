@@ -89,11 +89,15 @@ Rule/compatibility, rate, realtime, and entrance facts may come from different d
 {
   "source_id": 12,
   "source_type": "GOVERNMENT",
+  "source_name": "臺北市停車場資訊 V2",
+  "source_url": "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_alldesc.json",
   "source_updated_at": "2026-10-02T02:00:00Z",
   "fetched_at": "2026-10-02T02:01:00Z",
   "verified_at": null
 }
 ```
+
+source_name/source_url are nullable source metadata on each provenance, including tied rule evidence, rate support and aggregate contributors. Missing metadata stays NULL. Mobile shows the name and opens valid HTTPS source links; it does not derive a source URL from the source ID. Metadata does not change ranking or permission precedence.
 
 Do not substitute unrelated component timestamps. For realtime, non-null `fetched_at` is required before freshness may be `FRESH`.
 

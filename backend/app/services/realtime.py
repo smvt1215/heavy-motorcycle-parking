@@ -242,7 +242,9 @@ def aggregate_availability(zones: list[dict[str, Any]]) -> dict[str, Any]:
     unique: dict[tuple[Any, ...], dict[str, Any]] = {}
     for item in provenances:
         normalized = {field: item.get(field) for field in _PROVENANCE_FIELDS}
-        unique.setdefault(tuple(normalized.values()), normalized)
+        key = tuple(normalized.values())
+        normalized.update(source_name=item.get("source_name"), source_url=item.get("source_url"))
+        unique.setdefault(key, normalized)
     return {
         "status": status,
         "available": available,

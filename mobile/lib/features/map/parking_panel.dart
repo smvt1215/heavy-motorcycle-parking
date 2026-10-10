@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/navigation_service.dart';
+import '../../data/source_link_service.dart';
 import '../../domain/parking.dart';
 import '../account/account_controller.dart';
 import '../account/account_sheet.dart';
@@ -137,7 +138,7 @@ class ParkingPanel extends ConsumerWidget {
                 zones: state.detail?.zones ?? lot.zones,
               ),
               const SizedBox(height: 12),
-              Text('停車場整體：${summaryLabel(lot.availabilitySummary)}'),
+              Text('查詢時整體空位：${summaryLabel(lot.availabilitySummary)}'),
               Text(summaryFreshness(lot.availabilitySummary)),
               for (final source
                   in lot.availabilitySummary?.contributingSources ??
@@ -156,9 +157,16 @@ class ParkingPanel extends ConsumerWidget {
                 ),
               ],
               const Divider(height: 28),
-              Text('符合條件的停車區', style: Theme.of(context).textTheme.titleMedium),
+              Text('停車區資訊', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
-              for (final zone in lot.zones) _ZoneFacts(zone: zone),
+              for (final zone in state.detail == null
+                  ? lot.zones
+                  : displayDetailZones(
+                      state.detail!,
+                      includeUnknown: state.query.includeUnknown,
+                      spaceType: state.query.spaceType,
+                    ))
+                _ZoneFacts(zone: zone),
               if (state.detail case final detail?) ...[
                 const Divider(height: 28),
                 Text('入口與導航', style: Theme.of(context).textTheme.titleMedium),
@@ -411,9 +419,10 @@ class _ZoneFacts extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           _Compatibility(status: zone.compatibility.status),
-          if (zone.compatibility.reason != null)
+          if (compatibilityReasonLabel(zone.compatibility.reason)
+              case final reason?)
             Text(
-              zone.compatibility.reason!,
+              reason,
               style: Theme.of(context).textTheme.bodySmall,
             ),
           Text(zoneAvailabilityLabel(zone)),
@@ -442,19 +451,41 @@ class _ZoneFacts extends StatelessWidget {
   }
 }
 
-class _SourceLine extends StatelessWidget {
+class _SourceLine extends ConsumerWidget {
   const _SourceLine({required this.title, required this.source});
   final String title;
   final ParkingSource source;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Text(
-          '$title：${sourceLabel(source)}\n來源更新：${taipeiTime(source.sourceUpdatedAt)}\n擷取：${taipeiTime(source.fetchedAt)}',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      );
+  Widget build(BuildContext context, WidgetRef ref) {
+    final uri = sourceUri(source);
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$title：${sourceLabel(source)}\n來源更新：${taipeiTime(source.sourceUpdatedAt)}\n擷取：${taipeiTime(source.fetchedAt)}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          if (uri != null)
+            TextButton.icon(
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: Text('查看$title'),
+              onPressed: () async {
+                final opened =
+                    await ref.read(sourceLinkServiceProvider).open(uri);
+                if (!opened && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('無法開啟來源連結。')),
+                  );
+                }
+              },
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _EntranceFacts extends StatelessWidget {

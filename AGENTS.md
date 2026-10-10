@@ -24,7 +24,7 @@ Heavy Motorcycle Parking (重機停車通)
 9. Nearby v1: ALLOWED included, NOT_ALLOWED excluded, UNKNOWN excluded unless `include_unknown=true`; returned unknown stays explicitly UNKNOWN.
 10. Lot nearby compatibility is derived from returned zones: any ALLOWED => lot ALLOWED; otherwise returned UNKNOWN => lot UNKNOWN; known NOT_ALLOWED zones are filtered first.
 11. Parking-rule resolution is deterministic: applicable zone-specific > lot-wide; EXCEPTION > BASELINE; highest configured authority_priority; then evaluate all tied highest-tier rules. Any TRUE/FALSE conflict, any NULL mixed with a known value, or all NULL => UNKNOWN. Never break legality conflicts with recency, row order, IDs, or confidence, and never fall back to a lower tier.
-12. Do not expose LIGHT_MOTO_ONLY or generic show-prohibited controls in normal YELLOW/RED search; prohibited-location browsing is a separate future mode.
+12. Do not expose LIGHT_MOTO_ONLY in LARGE_HEAVY search. NORMAL_HEAVY may search confirmed applicable ordinary motorcycle zones. Generic show-prohibited controls are excluded from both classes; prohibited-location browsing is a separate future mode.
 13. Selected-vehicle endpoints require explicit `vehicle`; do not infer it from authentication/profile state.
 14. Scheduled compatibility/rates use explicit `evaluation_at`. Nearby cursors pin it. Detail/rates/realtime accept optional `at` and expose resolved `evaluation_at`. MVP local schedule evaluation uses Asia/Taipei. Realtime freshness remains current-data freshness.
 15. User-scoped endpoints use Bearer access-token authentication. Identity comes from the validated token; missing/invalid credentials => 401, insufficient permission => 403.

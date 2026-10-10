@@ -243,8 +243,8 @@ void main() {
         child: MaterialApp(home: Scaffold(body: ParkingPanel(state: state))),
       ),
     );
-    expect(find.text('停車場整體：空位不明 · 部分涵蓋，總數不明'), findsOneWidget);
-    expect(find.textContaining('停車場整體：9/10'), findsNothing);
+    expect(find.text('查詢時整體空位：空位不明 · 部分涵蓋，總數不明'), findsOneWidget);
+    expect(find.textContaining('查詢時整體空位：9/10'), findsNothing);
   });
 
   for (final scenario in [

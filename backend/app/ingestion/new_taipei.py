@@ -207,6 +207,7 @@ class NewTaipeiParkingAdapter(BaseParkingAdapter):
                         policy_rule(
                             NEW_TAIPEI_PUBLIC_CAR,
                             zone,
+                            scope_effective_from=datetime.fromisoformat(MANAGED_FACILITIES["roster_published_at"]),
                             evidence={
                                 "facility": verified,
                                 "roster_url": MANAGED_FACILITIES["roster_url"],

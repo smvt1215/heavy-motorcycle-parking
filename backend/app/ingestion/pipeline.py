@@ -126,6 +126,7 @@ class ParkingIngestionPipeline:
                 # Both feeds share this transaction lock. Stable child identities
                 # and monotonic update checks must also hold for overlapping workers.
                 await self.session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": self.source.lock_key})
+                await self.writer.narrow_policy_history()
                 for index, (record, raw_id) in enumerate(zip(records, raw_ids, strict=True)):
                     if index:
                         # Persist the previous record's statuses, then drop loaded ORM

@@ -120,3 +120,5 @@ unknown-data handling, file replay and observable record failures.
 ## License
 
 All rights reserved.
+
+雙北政策來源、核對範圍與路邊 worker：[雙北政策與資料](docs/twin-city-policy.md)。

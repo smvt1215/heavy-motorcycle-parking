@@ -1,15 +1,17 @@
 """Transactional source-owned upserts. Other sources' facts are never replaced."""
 
 import hashlib
+import json
 from dataclasses import asdict
 from datetime import datetime
 
 from geoalchemy2 import WKTElement
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingestion.contracts import FeedSnapshot, NormalizedLot, NormalizedRealtime, NormalizedZone, RecordError
+from app.ingestion.policies import MANAGED_FACILITIES, NEW_TAIPEI_PUBLIC_CAR, POLICIES
 from app.ingestion.sources import TAIPEI, CitySource
 from app.models import (
     DataSource,
@@ -22,6 +24,7 @@ from app.models import (
     ParkingRealtime,
     ParkingRule,
     ParkingZone,
+    RateParseStatus,
     RealtimeStatus,
     RuleKind,
 )
@@ -30,6 +33,12 @@ from app.models import (
 def identity(external_id: str, entity: str, key: str, prefix: str = TAIPEI.key) -> str:
     digest = hashlib.sha256(f"{external_id}\0{entity}\0{key}".encode()).hexdigest()
     return f"{prefix}:{entity}:{digest}"
+
+
+def _close_rate(rate: ParkingRate, at: datetime) -> None:
+    if rate.effective_from is not None and at <= rate.effective_from:
+        raise RecordError("INVALID_RETIREMENT_INSTANT", "Rate retirement must follow its start instant")
+    rate.effective_to = at
 
 
 def point(lat: float, lng: float) -> WKTElement:
@@ -45,6 +54,35 @@ def _older(snapshot: FeedSnapshot, source_updated_at: datetime | None, fetched_a
         and source_updated_at <= snapshot.fetched_at
         and snapshot.source_updated_at < source_updated_at
     )
+
+
+def _notes(raw: str | None) -> dict:
+    try:
+        value = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        value = None
+    return value if isinstance(value, dict) else {"legacy_notes": raw}
+
+
+def _scope_receipt(evidence: dict, legacy_fetched_at: datetime | None) -> datetime | None:
+    scope = evidence.get("scope_source")
+    value = evidence.get("scope_verified_from")
+    if value is None and isinstance(scope, dict):
+        value = scope.get("fetched_at")
+    if value is None:
+        return legacy_fetched_at
+    try:
+        instant = datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        return None
+    return instant if instant is not None and instant.utcoffset() is not None else None
+
+
+def _policy_floor(code: str, receipt: datetime) -> datetime:
+    floor = max(POLICIES[code].effective_from, receipt)
+    if code == NEW_TAIPEI_PUBLIC_CAR.code:
+        floor = max(floor, datetime.fromisoformat(MANAGED_FACILITIES["roster_published_at"]))
+    return floor
 
 
 class ParkingIngestionWriter:
@@ -83,6 +121,99 @@ class ParkingIngestionWriter:
             ).returning(DataSource.id)
             ids[kind] = (await self.session.execute(statement)).scalar_one()
         return ids
+
+    async def ensure_policy_source(self, code: str) -> int:
+        policy = POLICIES[code]
+        values = dict(
+            code=code,
+            name=policy.name,
+            source_type=DataSourceType.GOVERNMENT,
+            url=policy.url,
+            attribution=policy.scope,
+            freshness_seconds=86400,
+            freshness_uses_source_timestamp=False,
+        )
+        statement = insert(DataSource).values(**values)
+        statement = statement.on_conflict_do_update(constraint="uq_data_sources_code", set_=values)
+        return (await self.session.execute(statement.returning(DataSource.id))).scalar_one()
+
+    async def narrow_policy_history(self) -> None:
+        """Correct every owned version independently of today's scope match.
+
+        An interval ending before its verified scope has no supported portion.
+        Retain that interval and its evidence, but exclude it from evaluation.
+        The caller holds the source transaction lock before changing history.
+        """
+        rules = (
+            await self.session.execute(
+                select(ParkingRule, DataSource.code)
+                .join(DataSource, DataSource.id == ParkingRule.source_id)
+                .where(
+                    DataSource.code.in_(POLICIES),
+                    ParkingRule.source_record_id.startswith(f"{self.source.key}:policy:", autoescape=True),
+                )
+            )
+        ).all()
+        for rule, code in rules:
+            evidence = _notes(rule.notes)
+            receipt = _scope_receipt(evidence, rule.fetched_at)
+            if receipt is None:
+                rule.active = False
+            else:
+                floor = _policy_floor(code, receipt)
+                if rule.effective_to is not None and rule.effective_to <= floor:
+                    rule.active = False
+                else:
+                    rule.effective_from = max(rule.effective_from or floor, floor)
+                if "scope_verified_from" not in evidence:
+                    rule.notes = json.dumps(
+                        {**evidence, "scope_verified_from": receipt.isoformat()}, ensure_ascii=False, sort_keys=True
+                    )
+        rates = (
+            await self.session.execute(
+                select(ParkingRate, ParkingRateSource, DataSource.code)
+                .join(DataSource, DataSource.id == ParkingRate.source_id)
+                .join(ParkingRateSource, ParkingRateSource.rate_id == ParkingRate.id)
+                .where(
+                    DataSource.code.in_(POLICIES),
+                    ParkingRate.source_record_id.startswith(f"{self.source.key}:rate:", autoescape=True),
+                    ParkingRateSource.source_id == ParkingRate.source_id,
+                )
+            )
+        ).all()
+        for rate, source, code in rates:
+            evidence = source.raw_payload if isinstance(source.raw_payload, dict) else {}
+            receipt = _scope_receipt(evidence, source.fetched_at or rate.fetched_at)
+            if receipt is None or (rate.effective_to is not None and rate.effective_to <= _policy_floor(code, receipt)):
+                # Preserve the rate, original amounts and source evidence, but no
+                # unsupported historical interval may yield a confirmed price.
+                rate.parse_status = RateParseStatus.PARTIALLY_PARSED
+                source.raw_payload = {**evidence, "scope_history_unverified": True}
+            else:
+                floor = _policy_floor(code, receipt)
+                rate.effective_from = max(rate.effective_from or floor, floor)
+                if "scope_verified_from" not in evidence:
+                    source.raw_payload = {**evidence, "scope_verified_from": receipt.isoformat()}
+        await self.session.flush()
+
+    async def retire_policy_rules(self, parking_id: int, live_ids: set[str], at: datetime) -> None:
+        rules = (
+            await self.session.scalars(
+                select(ParkingRule).where(
+                    ParkingRule.parking_id == parking_id,
+                    ParkingRule.source_record_id.startswith(f"{self.source.key}:policy:", autoescape=True),
+                    ParkingRule.source_id.in_(select(DataSource.id).where(DataSource.code.in_(POLICIES))),
+                    ParkingRule.effective_to.is_(None),
+                    ParkingRule.active.is_(True),
+                )
+            )
+        ).all()
+        for rule in rules:
+            if rule.source_record_id not in live_ids:
+                if rule.effective_from >= at:
+                    rule.active = False
+                else:
+                    rule.effective_to = at
 
     async def write_lot(self, lot: NormalizedLot, snapshot: FeedSnapshot, source_id: int) -> None:
         existing = (
@@ -129,11 +260,28 @@ class ParkingIngestionWriter:
                     source_record_id=self.identity(lot.external_id, "rule", (old.external_id or "").rsplit(":", 1)[-1]),
                 )
 
+        await self.retire_policy_rules(
+            existing.id,
+            {
+                self.identity(lot.external_id, "policy", f"{zone.key}:{rule.key}")
+                for zone in lot.zones
+                for rule in zone.rules
+            },
+            snapshot.fetched_at,
+        )
+
         rates = (
             await self.session.scalars(
                 select(ParkingRate)
                 .join(ParkingZone)
-                .where(ParkingZone.parking_id == existing.id, ParkingRate.source_id == source_id)
+                .where(
+                    ParkingZone.parking_id == existing.id,
+                    ParkingRate.source_record_id.startswith(f"{self.source.key}:rate:", autoescape=True),
+                    or_(
+                        ParkingRate.source_id == source_id,
+                        ParkingRate.source_id.in_(select(DataSource.id).where(DataSource.code.in_(POLICIES))),
+                    ),
+                )
             )
         ).all()
         live_rates = {
@@ -143,7 +291,7 @@ class ParkingIngestionWriter:
         }
         for rate in rates:
             if rate.source_record_id not in live_rates and rate.effective_to is None:
-                rate.effective_to = snapshot.fetched_at
+                _close_rate(rate, snapshot.fetched_at)
 
         old_entrances = (
             await self.session.scalars(
@@ -203,22 +351,105 @@ class ParkingIngestionWriter:
             normal_heavy=zone.normal_heavy,
             large_heavy=zone.large_heavy,
         )
+        for rule in zone.rules:
+            policy_id = await self.ensure_policy_source(rule.policy_code)
+            key = self.identity(external_id, "policy", f"{zone.key}:{rule.key}")
+            versions = (
+                await self.session.scalars(
+                    select(ParkingRule).where(
+                        ParkingRule.source_id == policy_id,
+                        ParkingRule.source_record_id == key,
+                    )
+                )
+            ).all()
+            row = next((r for r in versions if r.active and r.effective_to is None), None)
+            if row is not None and (
+                row.normal_heavy_allowed != rule.normal_heavy
+                or row.large_heavy_allowed != rule.large_heavy
+                or row.schedule != rule.schedule
+                or row.rule_kind != rule.rule_kind
+                or row.authority_priority != rule.authority_priority
+            ):
+                if row.effective_from >= snapshot.fetched_at:
+                    row.active = False
+                else:
+                    row.effective_to = snapshot.fetched_at
+                row = None
+            if row is None:
+                row = ParkingRule(
+                    parking_id=parking_id,
+                    zone_id=entity.id,
+                    source_id=policy_id,
+                    source_record_id=key,
+                    effective_from=max(rule.effective_from, snapshot.fetched_at),
+                )
+                self.session.add(row)
+            # A later reviewed scope date narrows old grants; reappearance gaps stay closed.
+            row.effective_from = max(row.effective_from or rule.effective_from, rule.effective_from)
+            row.normal_heavy_allowed, row.large_heavy_allowed = rule.normal_heavy, rule.large_heavy
+            row.rule_kind, row.authority_priority, row.active = rule.rule_kind, rule.authority_priority, True
+            row.schedule = rule.schedule
+            scope_verified_from = _notes(row.notes).get("scope_verified_from", snapshot.fetched_at.isoformat())
+            row.notes = json.dumps(
+                {
+                    **rule.evidence,
+                    "scope_verified_from": scope_verified_from,
+                    "policy_published_on": POLICIES[rule.policy_code].published_at.date().isoformat(),
+                    "scope_source": {
+                        "source_id": source_id,
+                        "external_id": external_id,
+                        "zone_key": zone.key,
+                        "fetched_at": snapshot.fetched_at.isoformat(),
+                    },
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            # Reviewed announcements provide a publication date, not an exact
+            # update/receipt instant. The feed receipt belongs to scope evidence.
+            row.source_updated_at, row.fetched_at = None, None
+            mapping_verified_at = rule.evidence.get("mapping_verified_at")
+            row.verified_at = datetime.fromisoformat(mapping_verified_at) if mapping_verified_at else None
         for rate in zone.rates:
+            # Upcoming policy rates are activated by a later import; a future rate
+            # cannot be retired into a backwards or empty effective interval.
+            if rate.effective_from is not None and rate.effective_from > snapshot.fetched_at:
+                continue
+            rate_source_id = await self.ensure_policy_source(rate.policy_code) if rate.policy_code else source_id
+            updated_at = None if rate.policy_code else snapshot.source_updated_at
+            fetched_at = None if rate.policy_code else snapshot.fetched_at
             key = self.identity(external_id, "rate", f"{zone.key}:{rate.key}")
             versions = (
                 await self.session.scalars(
-                    select(ParkingRate).where(ParkingRate.source_id == source_id, ParkingRate.source_record_id == key)
+                    select(ParkingRate).where(
+                        ParkingRate.source_id == rate_source_id, ParkingRate.source_record_id == key
+                    )
                 )
             ).all()
             row = next((version for version in versions if version.effective_to is None), None)
+            if row is not None and rate.policy_code:
+                old_schedules = (
+                    await self.session.scalars(
+                        select(ParkingRateRule.schedule)
+                        .where(ParkingRateRule.rate_id == row.id)
+                        .order_by(ParkingRateRule.id)
+                    )
+                ).all()
+                if old_schedules != [r.schedule for r in rate.parsed.rules]:
+                    _close_rate(row, snapshot.fetched_at)
+                    row = None
             if row is None:
                 # A retired interval stays closed; a reappearance is a new version
                 # starting now, so evaluation inside the gap never sees this rate.
                 row = ParkingRate(
                     zone_id=entity.id,
-                    source_id=source_id,
+                    source_id=rate_source_id,
                     source_record_id=key,
-                    effective_from=snapshot.fetched_at if versions else None,
+                    effective_from=max(snapshot.fetched_at, rate.effective_from)
+                    if rate.effective_from
+                    else snapshot.fetched_at
+                    if versions
+                    else rate.effective_from,
                 )
                 self.session.add(row)
             parsed = rate.parsed
@@ -227,7 +458,7 @@ class ParkingIngestionWriter:
             row.currency = "TWD"
             row.base_amount, row.unit_minutes = parsed.base_amount, parsed.unit_minutes
             row.free_minutes, row.daily_max_amount = parsed.free_minutes, parsed.daily_max_amount
-            row.source_updated_at, row.fetched_at = snapshot.source_updated_at, snapshot.fetched_at
+            row.source_updated_at, row.fetched_at = updated_at, fetched_at
             await self.session.flush()
             await self.session.execute(delete(ParkingRateRule).where(ParkingRateRule.rate_id == row.id))
             for rule in parsed.rules:
@@ -236,16 +467,29 @@ class ParkingIngestionWriter:
                 await self.session.scalars(
                     select(ParkingRateSource).where(
                         ParkingRateSource.rate_id == row.id,
-                        ParkingRateSource.source_id == source_id,
+                        ParkingRateSource.source_id == rate_source_id,
                         ParkingRateSource.source_record_id == key,
                     )
                 )
             ).one_or_none()
             if evidence is None:
-                evidence = ParkingRateSource(rate_id=row.id, source_id=source_id, source_record_id=key)
+                evidence = ParkingRateSource(rate_id=row.id, source_id=rate_source_id, source_record_id=key)
                 self.session.add(evidence)
+            previous = evidence.raw_payload if isinstance(evidence.raw_payload, dict) else {}
             evidence.raw_text, evidence.raw_payload = parsed.raw_text, rate.raw_payload
-            evidence.source_updated_at, evidence.fetched_at = snapshot.source_updated_at, snapshot.fetched_at
+            if rate.policy_code:
+                evidence.raw_payload = {
+                    **rate.raw_payload,
+                    "scope_verified_from": previous.get("scope_verified_from", snapshot.fetched_at.isoformat()),
+                    "policy_published_on": POLICIES[rate.policy_code].published_at.date().isoformat(),
+                    "scope_source": {
+                        "source_id": source_id,
+                        "external_id": external_id,
+                        "zone_key": zone.key,
+                        "fetched_at": snapshot.fetched_at.isoformat(),
+                    },
+                }
+            evidence.source_updated_at, evidence.fetched_at = updated_at, fetched_at
 
     async def _write_permission(
         self,
@@ -383,16 +627,24 @@ class ParkingIngestionWriter:
                     snapshot,
                     source_id,
                 )
+            await self.retire_policy_rules(lot.id, set(), snapshot.fetched_at)
             rates = (
                 await self.session.scalars(
                     select(ParkingRate)
                     .join(ParkingZone)
-                    .where(ParkingZone.parking_id == lot.id, ParkingRate.source_id == source_id)
+                    .where(
+                        ParkingZone.parking_id == lot.id,
+                        ParkingRate.source_record_id.startswith(f"{self.source.key}:rate:", autoescape=True),
+                        or_(
+                            ParkingRate.source_id == source_id,
+                            ParkingRate.source_id.in_(select(DataSource.id).where(DataSource.code.in_(POLICIES))),
+                        ),
+                    )
                 )
             ).all()
             for rate in rates:
                 if rate.effective_to is None:
-                    rate.effective_to = snapshot.fetched_at
+                    _close_rate(rate, snapshot.fetched_at)
             entrances = (
                 await self.session.scalars(
                     select(ParkingEntrance).where(

@@ -1,6 +1,9 @@
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+[tool.setuptools.package-data]
+"app.ingestion" = ["evidence/*.json"]
+
 [project]
 name = "heavy-parking-backend"
 version = "0.1.0"

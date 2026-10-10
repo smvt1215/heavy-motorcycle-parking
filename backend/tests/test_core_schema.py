@@ -310,7 +310,11 @@ def test_raw_evidence_preserves_invalid_counts(db, tables, evidence):
             external_id="duplicate-upstream-id",
             payload=case,
         )
-    rows = db.execute(select(tables["raw_parking_records"].c.payload)).scalars().all()
+    rows = (
+        db.execute(select(tables["raw_parking_records"].c.payload).order_by(tables["raw_parking_records"].c.id))
+        .scalars()
+        .all()
+    )
     assert rows == list(cases)
 
 

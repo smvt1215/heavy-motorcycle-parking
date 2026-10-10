@@ -112,4 +112,29 @@ NEW_TAIPEI = CitySource(
     feeds={policy.kind: policy for policy in (NEW_TAIPEI_STATIC, NEW_TAIPEI_REALTIME)},
 )
 
-CITY_SOURCES = {source.key: source for source in (TAIPEI, NEW_TAIPEI)}
+NEW_TAIPEI_ROADSIDE_DATASET = "54a507c4-c038-41b5-bf60-bbecb9d052c6"
+NEW_TAIPEI_ROADSIDE_FEEDS = {
+    kind: FeedPolicy(
+        kind,
+        f"NEW_TAIPEI_ROADSIDE_{kind.upper()}",
+        f"新北市路邊停車位資訊（{kind}）",
+        f"https://data.ntpc.gov.tw/api/datasets/{NEW_TAIPEI_ROADSIDE_DATASET}/json",
+        180 if kind == "realtime" else 86400,
+        page_size=1000,
+        max_pages=100,
+        reconcile_min_ratio=0.8 if kind == "static" else None,
+    )
+    for kind in ("static", "realtime")
+}
+NEW_TAIPEI_ROADSIDE_SOURCE = CitySource(
+    key="new_taipei_roadside",
+    city_name="新北市",
+    dataset_url="https://data.gov.tw/dataset/122901",
+    license_url=NEW_TAIPEI_LICENSE_URL,
+    attribution="新北市政府交通局 新北市路邊停車位資訊（政府資料開放授權條款第1版）",
+    lock_key=7400403,
+    rule_note="Exact cell category only; undocumented status codes remain UNKNOWN",
+    feeds=NEW_TAIPEI_ROADSIDE_FEEDS,
+)
+
+CITY_SOURCES = {source.key: source for source in (TAIPEI, NEW_TAIPEI, NEW_TAIPEI_ROADSIDE_SOURCE)}

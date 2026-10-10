@@ -886,8 +886,9 @@ class ModerationService(CommunityCaseService):
         target.suspended_at = now if reason_code else None
         target.suspended_reason = reason_code
         await self.session.flush()
-        # Their stances stop (or resume) counting; recount every case they are active on.
-        for case_id in await self.repo.cases_with_active_stance(target.id):
+        # Their stances stop (or resume) counting and their own live observations go back to
+        # review; recount open cases they authored or stand on, locking in ascending ID order.
+        for case_id in await self.repo.cases_to_recount_for(target.id):
             await self._precheck(await self._locked_case(case_id), now)
         return target
 

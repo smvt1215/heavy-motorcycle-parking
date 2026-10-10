@@ -370,7 +370,8 @@ def _decide(case, now, results, supporters, objectors) -> Decision:
         return Decision.KEEP
     if derive_publication_status(state, case.published_until, now) == PublicationStatus.EXPIRED:
         return Decision.KEEP
-    if objectors:
+    # A suspended author or a valid objection takes any live observation back to review.
+    if objectors or case.author_suspended:
         return Decision.SUSPEND
     if case.publication_basis == PublicationBasis.COMMUNITY_CORROBORATED:
         photo_time = next(result for result in results if result.code == PrecheckCode.PHOTO_TIME)

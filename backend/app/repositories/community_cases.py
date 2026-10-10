@@ -185,15 +185,27 @@ class CommunityCaseRepository:
     async def is_participant(self, case_id: int, participant_id: int) -> bool:
         return case_id in await self.participant_case_ids(participant_id)
 
-    async def cases_with_active_stance(self, participant_id: int) -> list[int]:
-        rows = await self.session.scalars(
-            select(CommunityCaseStance.case_id).where(
-                CommunityCaseStance.participant_id == participant_id,
-                CommunityCaseStance.withdrawn_at.is_(None),
-                CommunityCaseStance.invalidated_at.is_(None),
-            )
+    async def cases_to_recount_for(self, participant_id: int) -> list[int]:
+        """Open or live cases the participant authored or holds an active stance on.
+
+        Closed (rejected, superseded or withdrawn) cases are skipped. IDs are returned
+        ascending so concurrent recounts lock cases in the same order.
+        """
+        stance_cases = select(CommunityCaseStance.case_id).where(
+            CommunityCaseStance.participant_id == participant_id,
+            CommunityCaseStance.withdrawn_at.is_(None),
+            CommunityCaseStance.invalidated_at.is_(None),
         )
-        return sorted(set(rows.all()))
+        rows = await self.session.scalars(
+            select(CommunityCase.id)
+            .where(
+                or_(CommunityCase.author_participant_id == participant_id, CommunityCase.id.in_(stance_cases)),
+                CommunityCase.review_status.not_in(("REJECTED", "SUPERSEDED")),
+                CommunityCase.publication_state != CasePublicationState.WITHDRAWN,
+            )
+            .order_by(CommunityCase.id)
+        )
+        return list(rows.all())
 
     async def published_for_parking(self, parking_id: int, now: datetime) -> list[CommunityCase]:
         return list(

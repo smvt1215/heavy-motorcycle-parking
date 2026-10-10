@@ -892,3 +892,34 @@ async def test_failed_object_deletion_stays_pending_until_retried(env):
     assert await drain(env["session"], storage, NOW + timedelta(minutes=5)) == (1, 0)
     await env["session"].refresh(entry)
     assert entry.completed_at is not None and stored_key not in storage.objects
+
+
+async def test_suspending_an_author_suspends_their_live_observation_only(env):
+    case = await published_case(env)
+    closed = await create(env)
+    await decide(env, closed["id"], "REJECT")
+    closed_version = (await moderation(env, closed["id"]))["case"]["version"]
+    author = (await moderation(env, case["id"]))["author_participant_id"]
+    response = await env["client"].put(
+        f"/api/v1/moderation/participants/{author}/suspension", json={"reason_code": "ABUSE"}, headers=auth(env, "mod")
+    )
+    assert response.status_code == 200
+    assert (await detail(env, case["id"]))["case"]["publication_status"] == "SUSPENDED"
+    # Closed cases are not recounted: no new precheck, event or version bump.
+    assert (await moderation(env, closed["id"]))["case"]["version"] == closed_version
+
+
+async def test_failed_request_with_a_completed_key_replays_the_stored_result(env):
+    payload = {"parking_id": env["lots"][0].id, "fact_type": "LIGHTING", "proposed_value": LIGHT}
+    first = await env["client"].post("/api/v1/community/cases", json=payload, headers=auth(env, "alice", "same-key"))
+    assert first.status_code == 201
+    # Pinned behaviour: once a key has completed, an identical retry replays it even if it would
+    # now fail (here: the author was suspended in between), because the digest matches.
+    author = (await moderation(env, first.json()["id"]))["author_participant_id"]
+    await env["client"].put(
+        f"/api/v1/moderation/participants/{author}/suspension", json={"reason_code": "ABUSE"}, headers=auth(env, "mod")
+    )
+    retry = await env["client"].post("/api/v1/community/cases", json=payload, headers=auth(env, "alice", "same-key"))
+    assert retry.status_code == 201 and retry.json() == first.json()
+    fresh = await env["client"].post("/api/v1/community/cases", json=payload, headers=auth(env, "alice", "new-key"))
+    assert fresh.status_code == 403 and fresh.json()["error"]["code"] == "PARTICIPANT_SUSPENDED"

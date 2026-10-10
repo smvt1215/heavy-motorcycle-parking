@@ -188,3 +188,11 @@ def test_observation_labels_never_claim_confirmed_access():
     assert observation_label("LIGHTING", Basis.COMMUNITY_CORROBORATED) is None
     assert observation_label("ENTRANCE_LOCATION", Basis.COMMUNITY_CORROBORATED) == "社群核實位置・通行性未確認"
     assert observation_label("ENTRANCE_LOCATION", Basis.MANUAL_REVIEW) == "人工複審採納位置・通行性未確認"
+
+
+def test_suspended_author_takes_a_live_observation_back_to_review():
+    three = (support(2), support(3), support(4))
+    suspended = replace(published(*three), author_suspended=True)
+    assert evaluate_case(suspended, NOW).decision == Decision.SUSPEND
+    manual = replace(published(*three[:1], basis=Basis.MANUAL_REVIEW), author_suspended=True)
+    assert evaluate_case(manual, NOW).decision == Decision.SUSPEND

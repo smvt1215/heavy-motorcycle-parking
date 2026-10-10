@@ -22,7 +22,7 @@ Map<String, dynamic> sourceJson({
 
 Map<String, dynamic> compatibilityJson({
   String status = 'ALLOWED',
-  String vehicle = 'RED',
+  String vehicle = 'LARGE_HEAVY',
   String reason = 'explicit_vehicle_permission',
   double? confidence = 1.0,
   bool withProvenance = true,
@@ -85,7 +85,7 @@ Map<String, dynamic> zoneJson({
   String spaceType = 'HEAVY_ONLY',
   int? capacity = 20,
   String status = 'ALLOWED',
-  String vehicle = 'RED',
+  String vehicle = 'LARGE_HEAVY',
   Map<String, dynamic>? rateSummary,
   Map<String, dynamic>? availability,
 }) =>
@@ -159,7 +159,7 @@ Map<String, dynamic> lotJson({
   double lat = 25.0331,
   double lng = 121.5628,
   String status = 'ALLOWED',
-  String vehicle = 'RED',
+  String vehicle = 'LARGE_HEAVY',
   List<Map<String, dynamic>>? zones,
   Map<String, dynamic>? availabilitySummary,
   int rankingGroup = 0,
@@ -188,7 +188,7 @@ Map<String, dynamic> lotJson({
 /// car-shared zone with a STALE AVAILABLE observation) and an unknown-only
 /// lot. Represents an `include_unknown=true` RED response.
 Map<String, dynamic> nearbyFixture({
-  String vehicle = 'RED',
+  String vehicle = 'LARGE_HEAVY',
   String? nextCursor,
   bool hasMore = false,
   String evaluationAt = fixtureEvaluationAt,
@@ -281,7 +281,7 @@ Map<String, dynamic> entranceJson({
 /// ALLOWED third, so selection must skip the first two.
 Map<String, dynamic> detailFixture({
   int id = 12345,
-  String vehicle = 'RED',
+  String vehicle = 'LARGE_HEAVY',
   String evaluationAt = fixtureEvaluationAt,
   List<Map<String, dynamic>>? entrances,
   List<Map<String, dynamic>>? zones,

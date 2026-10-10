@@ -53,7 +53,7 @@ void main() {
     final page = await repo.nearby(
       const ParkingQuery(
         center: center,
-        vehicle: VehicleType.yellow,
+        vehicle: VehicleType.normalHeavy,
         radius: 500,
         spaceType: SpaceType.heavyOnly,
         availableOnly: true,
@@ -66,7 +66,7 @@ void main() {
     expect(request.uri.queryParameters, {
       'lat': '25.033',
       'lng': '121.5654',
-      'vehicle': 'YELLOW',
+      'vehicle': 'NORMAL_HEAVY',
       'radius': '500',
       'space_type': 'HEAVY_ONLY',
       'available_only': 'true',
@@ -103,13 +103,13 @@ void main() {
     final (repo, adapter) = _repo((_) => (200, detailFixture()));
     final detail = await repo.detail(
       12345,
-      VehicleType.red,
+      VehicleType.largeHeavy,
       at: DateTime.utc(2026, 10, 2, 9, 30),
     );
     final request = adapter.requests.single;
     expect(request.uri.path, '/api/v1/parking/12345');
     expect(request.uri.queryParameters, {
-      'vehicle': 'RED',
+      'vehicle': 'LARGE_HEAVY',
       'at': '2026-10-02T09:30:00.000Z',
     });
     expect(detail.navigationTarget.isConfirmedEntrance, isTrue);
@@ -117,10 +117,13 @@ void main() {
 
   test('detail without at sends vehicle only', () async {
     final (repo, adapter) =
-        _repo((_) => (200, detailFixture(vehicle: 'YELLOW')));
-    final detail = await repo.detail(7, VehicleType.yellow);
-    expect(adapter.requests.single.uri.queryParameters, {'vehicle': 'YELLOW'});
-    expect(detail.vehicle, VehicleType.yellow);
+        _repo((_) => (200, detailFixture(vehicle: 'NORMAL_HEAVY')));
+    final detail = await repo.detail(7, VehicleType.normalHeavy);
+    expect(
+      adapter.requests.single.uri.queryParameters,
+      {'vehicle': 'NORMAL_HEAVY'},
+    );
+    expect(detail.vehicle, VehicleType.normalHeavy);
   });
 
   test('realtime and rates carry vehicle', () async {
@@ -130,7 +133,7 @@ void main() {
           200,
           {
             'parking_id': 1,
-            'vehicle': 'RED',
+            'vehicle': 'LARGE_HEAVY',
             'evaluation_at': fixtureEvaluationAt,
             'zones': [zoneJson(availability: availabilityJson())],
             'availability_summary': summaryJson(),
@@ -141,7 +144,7 @@ void main() {
         200,
         {
           'parking_id': 1,
-          'vehicle': 'RED',
+          'vehicle': 'LARGE_HEAVY',
           'evaluation_at': fixtureEvaluationAt,
           'zones': [
             {
@@ -168,14 +171,14 @@ void main() {
         },
       );
     });
-    final realtime = await repo.realtime(1, VehicleType.red);
-    final rates = await repo.rates(1, VehicleType.red);
+    final realtime = await repo.realtime(1, VehicleType.largeHeavy);
+    final rates = await repo.rates(1, VehicleType.largeHeavy);
     expect(adapter.requests.map((r) => r.uri.path), [
       '/api/v1/parking/1/realtime',
       '/api/v1/parking/1/rates',
     ]);
     for (final r in adapter.requests) {
-      expect(r.uri.queryParameters['vehicle'], 'RED');
+      expect(r.uri.queryParameters['vehicle'], 'LARGE_HEAVY');
     }
     expect(realtime.availabilitySummary!.canShowTotals, isTrue);
     expect(rates.zones.single.rates.single.applicability, 'MATCH');

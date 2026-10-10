@@ -123,7 +123,9 @@ async def test_repeat_import_preserves_normalized_ids_and_complete_raw_envelopes
         assert raw.raw_rate_text == row()["payex"]
         lot = await ParkingRepository(session).detail(original_lot_id)
         compat = ParkingCompatibilityService()
-        results = {zone.facts.space_type: compat.evaluate(lot.facts, zone.facts, "YELLOW", NOW) for zone in lot.zones}
+        results = {
+            zone.facts.space_type: compat.evaluate(lot.facts, zone.facts, "LARGE_HEAVY", NOW) for zone in lot.zones
+        }
         assert results["HEAVY_ONLY"].status == "ALLOWED"
         assert results["CAR_SHARED"].status == results["MOTO_SHARED"].status == "UNKNOWN"
         assert all(result.provenance[0].fetched_at == NOW for result in results.values())
@@ -235,7 +237,7 @@ async def test_older_static_snapshot_cannot_replace_newer_permission(live):
     )
     assert result.status == "FAILED"
     async with session.begin():
-        assert (await session.scalars(select(ParkingRule).where(ParkingRule.yellow_plate_allowed.is_(True)))).one()
+        assert (await session.scalars(select(ParkingRule).where(ParkingRule.normal_heavy_allowed.is_(True)))).one()
 
 
 async def test_removed_zone_permission_becomes_unknown_not_space_type_default(live):
@@ -248,7 +250,9 @@ async def test_removed_zone_permission_becomes_unknown_not_space_type_default(li
         lot_id = (await session.scalars(select(ParkingLot.id))).one()
         lot = await ParkingRepository(session).detail(lot_id)
         zone = next(z for z in lot.zones if z.facts.space_type == "HEAVY_ONLY")
-        result = ParkingCompatibilityService().evaluate(lot.facts, zone.facts, "YELLOW", NOW + timedelta(minutes=1))
+        result = ParkingCompatibilityService().evaluate(
+            lot.facts, zone.facts, "LARGE_HEAVY", NOW + timedelta(minutes=1)
+        )
         assert result.status == "UNKNOWN" and zone.capacity is None
         assert result.rule_ids
 
@@ -337,7 +341,7 @@ async def test_unknown_or_zero_capacity_does_not_gain_heavy_permission(live):
         lot_id = (await session.scalars(select(ParkingLot.id))).one()
         lot = await ParkingRepository(session).detail(lot_id)
         assert all(
-            ParkingCompatibilityService().evaluate(lot.facts, z.facts, "RED", NOW).status == "UNKNOWN"
+            ParkingCompatibilityService().evaluate(lot.facts, z.facts, "LARGE_HEAVY", NOW).status == "UNKNOWN"
             for z in lot.zones
         )
 
@@ -352,7 +356,7 @@ async def test_unlabelled_parsed_price_never_confirms_selected_vehicle(live):
         lot = await ParkingRepository(session).detail(lot_id)
         heavy = next(z for z in lot.zones if z.facts.space_type == "HEAVY_ONLY")
         assert heavy.rates[0].parse_status == "PARSED" and heavy.rates[0].vehicle is None
-        summary, _ = resolve_rates(heavy.rates, "YELLOW", NOW)
+        summary, _ = resolve_rates(heavy.rates, "LARGE_HEAVY", NOW)
         assert summary is None
 
 
@@ -401,7 +405,7 @@ async def test_static_upsert_preserves_other_sources_facts(live):
             source_id=other.id,
             rule_kind="EXCEPTION",
             authority_priority=500,
-            yellow_plate_allowed=False,
+            normal_heavy_allowed=False,
         )
         entry = ParkingEntrance(
             parking_id=lot_id, source_id=other.id, name="Operator entrance", heavy_motorcycle_access=True
@@ -411,7 +415,7 @@ async def test_static_upsert_preserves_other_sources_facts(live):
         rule_id, entry_id = rule.id, entry.id
     await pipeline.ingest(snapshot(fetched_at=NOW + timedelta(seconds=10)))
     async with session.begin():
-        assert (await session.get(ParkingRule, rule_id)).yellow_plate_allowed is False
+        assert (await session.get(ParkingRule, rule_id)).normal_heavy_allowed is False
         assert (await session.get(ParkingEntrance, entry_id)).heavy_motorcycle_access is True
 
 
@@ -479,7 +483,7 @@ async def test_disappeared_lot_becomes_unknown_and_retires_rates(live):
         lot_id = (await session.scalars(select(ParkingLot.id).where(ParkingLot.external_id == "M4-B"))).one()
         lot = await ParkingRepository(session).detail(lot_id)
         assert all(
-            ParkingCompatibilityService().evaluate(lot.facts, z.facts, "YELLOW", NOW).status == "UNKNOWN"
+            ParkingCompatibilityService().evaluate(lot.facts, z.facts, "LARGE_HEAVY", NOW).status == "UNKNOWN"
             for z in lot.zones
         )
         rates = (
@@ -495,7 +499,7 @@ async def test_failed_static_record_is_not_treated_as_a_deleted_lot(live):
     bad["tw97x"] = None
     await pipeline.ingest(snapshot([bad], fetched_at=NOW + timedelta(minutes=1)))
     async with session.begin():
-        heavy = (await session.scalars(select(ParkingRule).where(ParkingRule.yellow_plate_allowed.is_(True)))).one()
+        heavy = (await session.scalars(select(ParkingRule).where(ParkingRule.normal_heavy_allowed.is_(True)))).one()
         assert heavy.fetched_at == NOW
 
 
@@ -549,7 +553,7 @@ async def test_rate_reappearance_keeps_retired_interval_and_opens_new_version(li
     session, pipeline = live
     await pipeline.ingest(snapshot())
     async with session.begin():
-        original = (await session.scalars(select(ParkingRate).where(ParkingRate.vehicle_type == "YELLOW"))).one()
+        original = (await session.scalars(select(ParkingRate).where(ParkingRate.vehicle_type == "LARGE_HEAVY"))).one()
         original_id, key = original.id, original.source_record_id
     changed = row()
     changed["FareInfo"]["FareRule"][0]["ParkingRates"] = 40
@@ -575,7 +579,9 @@ async def test_rate_reappearance_keeps_retired_interval_and_opens_new_version(li
         repository = ParkingRepository(session)
         for at, expected in ((retired_at + timedelta(seconds=5), set()), (back_at, {reopened.id})):
             lot = await repository.detail(lot_id)
-            live_ids = {rate["rate_id"] for zone in lot.zones for rate in resolve_rates(zone.rates, "YELLOW", at)[1]}
+            live_ids = {
+                rate["rate_id"] for zone in lot.zones for rate in resolve_rates(zone.rates, "LARGE_HEAVY", at)[1]
+            }
             assert live_ids & {v.id for v in versions} == expected
 
 

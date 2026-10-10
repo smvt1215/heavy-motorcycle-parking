@@ -54,7 +54,7 @@ A comprehensive parking application designed specifically for heavy motorcycles.
    uvicorn app.main:app --reload
    ```
 
-Parking discovery is available at `/api/v1/parking/nearby?lat=25.03&lng=121.56&vehicle=RED`.
+Parking discovery is available at `/api/v1/parking/nearby?lat=25.03&lng=121.56&vehicle=LARGE_HEAVY`.
 Detail, rates and realtime requests also require `vehicle`. See
 [M3 API implementation](docs/parking-api-implementation.md) for shared zone
 schemas, time-pinned queries, rate evaluation, cursor behavior and EXPLAIN evidence.
@@ -63,7 +63,7 @@ Production API workers require the same `CURSOR_SIGNING_KEY` secret of at least
 
 ### Mobile
 
-The M5 map home screen provides clustered markers, YELLOW/RED vehicle selection,
+The M5 map home screen provides clustered markers, NORMAL_HEAVY/LARGE_HEAVY vehicle selection,
 backend filters and a zone-scoped parking panel. Set restricted native Maps SDK
 keys and `API_BASE_URL` before device testing; see [Flutter map setup](docs/flutter-map.md).
 M8 adds favorites, community reports and sign-in state; see

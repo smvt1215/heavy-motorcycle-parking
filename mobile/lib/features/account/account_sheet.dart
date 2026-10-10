@@ -131,11 +131,12 @@ class _SignedInSection extends ConsumerWidget {
         const SizedBox(height: 4),
         const Text('只用來預設地圖的車種；每次查詢仍會明確送出所選車種。'),
         const SizedBox(height: 8),
+        const Text('普重：普通重型機車；大重：大型重型機車（黃牌／紅牌）'),
         SegmentedButton<VehicleType?>(
           showSelectedIcon: false,
           segments: const [
-            ButtonSegment(value: VehicleType.yellow, label: Text('黃牌')),
-            ButtonSegment(value: VehicleType.red, label: Text('紅牌')),
+            ButtonSegment(value: VehicleType.normalHeavy, label: Text('普重')),
+            ButtonSegment(value: VehicleType.largeHeavy, label: Text('大重')),
             ButtonSegment(value: null, label: Text('不設定')),
           ],
           selected: {profile.preferredVehicle},

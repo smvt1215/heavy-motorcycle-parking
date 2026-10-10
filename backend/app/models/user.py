@@ -33,7 +33,7 @@ class User(TimestampMixin, Base):
         UniqueConstraint("auth_subject", name="uq_users_auth_subject"),
         CheckConstraint("role IN ('USER', 'MODERATOR')", name="ck_users_role"),
         CheckConstraint(
-            "preferred_vehicle IS NULL OR preferred_vehicle IN ('YELLOW', 'RED')",
+            "preferred_vehicle IS NULL OR preferred_vehicle IN ('NORMAL_HEAVY', 'LARGE_HEAVY')",
             name="ck_users_preferred_vehicle_heavy",
         ),
     )
@@ -44,6 +44,7 @@ class User(TimestampMixin, Base):
     display_name: Mapped[str | None] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(16), server_default=text("'USER'"))
     # A client-side default only; selected-vehicle endpoints never read it.
+    legacy_preferred_vehicle: Mapped[str | None] = mapped_column(String(16))
     preferred_vehicle: Mapped[VehicleType | None] = mapped_column(vehicle_type_enum)
 
 
@@ -76,7 +77,8 @@ class UserVehicle(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer)
-    vehicle_type: Mapped[VehicleType] = mapped_column(vehicle_type_enum)
+    legacy_vehicle_type: Mapped[str | None] = mapped_column(String(16))
+    vehicle_type: Mapped[VehicleType | None] = mapped_column(vehicle_type_enum)
     nickname: Mapped[str | None] = mapped_column(String(100))
 
 

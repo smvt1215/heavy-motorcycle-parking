@@ -68,6 +68,7 @@ class ParkingRate(TimestampMixin, Base):
     rate_type: Mapped[RateType | None] = mapped_column(rate_type_enum)
     # NULL = unspecified vehicle applicability; never confirmation of a selected
     # vehicle's price. Explicit upstream all-vehicle rates can be mapped per vehicle.
+    legacy_vehicle_type: Mapped[str | None] = mapped_column(String(16))
     vehicle_type: Mapped[VehicleType | None] = mapped_column(vehicle_type_enum)
     currency: Mapped[str] = mapped_column(String(3), server_default=text("'TWD'"))
     base_amount: Mapped[Decimal | None] = mapped_column(MONEY)

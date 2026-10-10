@@ -200,6 +200,8 @@ class ParkingIngestionWriter:
             zone.car,
             snapshot,
             source_id,
+            normal_heavy=zone.normal_heavy,
+            large_heavy=zone.large_heavy,
         )
         for rate in zone.rates:
             key = self.identity(external_id, "rate", f"{zone.key}:{rate.key}")
@@ -260,6 +262,8 @@ class ParkingIngestionWriter:
         source_id,
         *,
         source_record_id=None,
+        normal_heavy=None,
+        large_heavy=None,
     ):
         record_id = source_record_id or self.identity(external_id, "rule", key)
         row = (
@@ -270,6 +274,7 @@ class ParkingIngestionWriter:
         if row is None:
             row = ParkingRule(parking_id=parking_id, zone_id=zone_id, source_id=source_id, source_record_id=record_id)
             self.session.add(row)
+        row.normal_heavy_allowed, row.large_heavy_allowed = normal_heavy, large_heavy
         row.green_plate_allowed, row.white_plate_allowed = green, white
         row.yellow_plate_allowed, row.red_plate_allowed, row.car_allowed = yellow, red, car
         row.rule_kind, row.authority_priority, row.active = RuleKind.BASELINE, self.source.authority_priority, True

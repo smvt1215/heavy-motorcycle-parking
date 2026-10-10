@@ -15,8 +15,8 @@ AvailabilitySummary _summary(Map<String, dynamic> json) =>
 void main() {
   group('enums', () {
     test('wire values and Traditional Chinese labels', () {
-      expect(VehicleType.yellow.wireValue, 'YELLOW');
-      expect(VehicleType.red.label, '紅牌');
+      expect(VehicleType.normalHeavy.wireValue, 'NORMAL_HEAVY');
+      expect(VehicleType.largeHeavy.label, '大重');
       expect(SpaceType.lightMotoOnly.wireValue, 'LIGHT_MOTO_ONLY');
       expect(SpaceType.searchable, isNot(contains(SpaceType.lightMotoOnly)));
       expect(CompatibilityStatus.unknown.label, '未確認');
@@ -29,8 +29,25 @@ void main() {
         throwsFormatException,
       );
       expect(() => AvailabilityStatus.fromWire('STALE'), throwsFormatException);
-      expect(() => VehicleType.fromWire('GREEN'), throwsFormatException);
+      for (final legacy in ['GREEN', 'WHITE', 'YELLOW', 'RED', 'CAR']) {
+        expect(() => VehicleType.fromWire(legacy), throwsFormatException);
+      }
     });
+  });
+
+  test('normal class may search conventional motorcycle spaces', () {
+    const normal = ParkingQuery(
+      center: GeoPoint(25.03, 121.56),
+      vehicle: VehicleType.normalHeavy,
+      spaceType: SpaceType.lightMotoOnly,
+    );
+    expect(normal.toQueryParameters()['vehicle'], 'NORMAL_HEAVY');
+    expect(normal.toQueryParameters()['space_type'], 'LIGHT_MOTO_ONLY');
+    expect(
+      () => normal.copyWith(vehicle: VehicleType.largeHeavy).validate(),
+      throwsArgumentError,
+    );
+    expect(VehicleType.largeHeavy.formalName, contains('黃牌／紅牌'));
   });
 
   group('nearby page parsing', () {
@@ -50,7 +67,7 @@ void main() {
       expect(lot.distanceM, 420);
       expect(lot.location, const GeoPoint(25.0331, 121.5628));
       expect(lot.compatibility, CompatibilityStatus.allowed);
-      expect(lot.compatibilityVehicle, VehicleType.red);
+      expect(lot.compatibilityVehicle, VehicleType.largeHeavy);
       expect(lot.rankingGroup, 0);
       expect(lot.rankingScoreBp, 7420);
 
@@ -269,7 +286,7 @@ void main() {
   group('ParkingDetail.navigationTarget', () {
     test('parses tri-state entrances and selects the ALLOWED one', () {
       final detail = ParkingDetail.fromJson(detailFixture());
-      expect(detail.vehicle, VehicleType.red);
+      expect(detail.vehicle, VehicleType.largeHeavy);
       expect(detail.evaluationAt, DateTime.utc(2026, 10, 2, 9, 30));
       expect(
         detail.entrances.map((e) => e.heavyMotorcycleAccess),
@@ -333,7 +350,7 @@ void main() {
       expect(const ParkingQuery(center: center).toQueryParameters(), {
         'lat': 25.033,
         'lng': 121.5654,
-        'vehicle': 'RED',
+        'vehicle': 'LARGE_HEAVY',
         'radius': 1000,
       });
     });
@@ -341,7 +358,7 @@ void main() {
     test('all filters map to backend parameter names', () {
       final query = ParkingQuery(
         center: center,
-        vehicle: VehicleType.yellow,
+        vehicle: VehicleType.normalHeavy,
         radius: 3000,
         spaceType: SpaceType.motoShared,
         availableOnly: true,
@@ -354,7 +371,7 @@ void main() {
       expect(query.toQueryParameters(), {
         'lat': 25.033,
         'lng': 121.5654,
-        'vehicle': 'YELLOW',
+        'vehicle': 'NORMAL_HEAVY',
         'radius': 3000,
         'space_type': 'MOTO_SHARED',
         'available_only': true,
@@ -445,7 +462,7 @@ void main() {
             zoneJson(),
             zoneJson(zoneId: 21, status: 'NOT_ALLOWED'),
             zoneJson(zoneId: 22, spaceType: 'LIGHT_MOTO_ONLY'),
-            zoneJson(zoneId: 23, vehicle: 'YELLOW'),
+            zoneJson(zoneId: 23, vehicle: 'NORMAL_HEAVY'),
           ],
         ),
       );
@@ -454,7 +471,8 @@ void main() {
     });
 
     test('drops a lot whose vehicle differs from the query', () {
-      const query = ParkingQuery(center: center, vehicle: VehicleType.yellow);
+      const query =
+          ParkingQuery(center: center, vehicle: VehicleType.normalHeavy);
       expect(page.items[0].visibleFor(query), isNull);
     });
   });

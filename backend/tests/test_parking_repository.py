@@ -68,8 +68,8 @@ async def live(migrated):
                         source_id=sources[0].id,
                         rule_kind="BASELINE",
                         authority_priority=10,
-                        red_plate_allowed=permission,
-                        yellow_plate_allowed=permission,
+                        large_heavy_allowed=permission,
+                        normal_heavy_allowed=permission,
                         fetched_at=NOW,
                         confidence=0.5,
                     )
@@ -83,12 +83,12 @@ async def live(migrated):
                     source_id=sources[0].id,
                     rule_kind="BASELINE",
                     authority_priority=10,
-                    red_plate_allowed=None,
+                    large_heavy_allowed=None,
                 )
             )
             rate = ParkingRate(
                 zone_id=zones[0].id,
-                vehicle_type="RED",
+                vehicle_type="LARGE_HEAVY",
                 rate_type="HOURLY",
                 parse_status="PARSED",
                 base_amount=20,
@@ -176,7 +176,7 @@ async def test_live_gis_filters_radius_rounds_distance_and_batched_loading(live)
 @pytest.mark.parametrize("suffix", ["", "/rates", "/realtime"])
 async def test_live_specialized_common_schema_keeps_components_separate(live, suffix):
     client, _, lots, zones, sources = live
-    response = await client.get(f"/api/v1/parking/{lots[0].id}{suffix}", params={"vehicle": "RED"})
+    response = await client.get(f"/api/v1/parking/{lots[0].id}{suffix}", params={"vehicle": "LARGE_HEAVY"})
     assert response.status_code == 200, response.text
     data = response.json()
     serialized = {zone["zone_id"]: zone for zone in data["zones"]}
@@ -194,7 +194,7 @@ async def test_live_specialized_common_schema_keeps_components_separate(live, su
 
 async def test_live_nearby_optin_filters_returned_zones_and_numeric_unknown_isolation(live):
     client, _, lots, zones, _ = live
-    query = {"lat": 25.03, "lng": 121.56, "vehicle": "RED"}
+    query = {"lat": 25.03, "lng": 121.56, "vehicle": "LARGE_HEAVY"}
     confirmed = (await client.get("/api/v1/parking/nearby", params=query)).json()
     assert [item["id"] for item in confirmed["items"]] == [lots[0].id]
     first = confirmed["items"][0]
@@ -209,13 +209,19 @@ async def test_live_nearby_optin_filters_returned_zones_and_numeric_unknown_isol
 
 async def test_live_rate_rules_taipei_filters_and_pinned_realtime(live):
     client, _, lots, _, _ = live
-    query = {"lat": 25.03, "lng": 121.56, "vehicle": "RED", "hourly_rate_max_twd": 30, "daily_max_required": True}
+    query = {
+        "lat": 25.03,
+        "lng": 121.56,
+        "vehicle": "LARGE_HEAVY",
+        "hourly_rate_max_twd": 30,
+        "daily_max_required": True,
+    }
     weekday = await client.get("/api/v1/parking/nearby", params={**query, "at": "2026-10-05T12:00:00+08:00"})
     assert [item["id"] for item in weekday.json()["items"]] == [lots[0].id]
     weekend = await client.get("/api/v1/parking/nearby", params={**query, "at": "2026-10-04T12:00:00+08:00"})
     assert weekend.json()["items"] == []
     realtime = await client.get(
-        f"/api/v1/parking/{lots[0].id}/realtime", params={"vehicle": "RED", "at": "2026-10-04T12:00:00+08:00"}
+        f"/api/v1/parking/{lots[0].id}/realtime", params={"vehicle": "LARGE_HEAVY", "at": "2026-10-04T12:00:00+08:00"}
     )
     assert realtime.json()["zones"][0]["availability"]["freshness"]["status"] == "FRESH"
     assert realtime.json()["zones"][0]["rate_summary"]["comparison_hourly_rate_twd"] == 40
@@ -223,7 +229,7 @@ async def test_live_rate_rules_taipei_filters_and_pinned_realtime(live):
 
 async def test_live_source_freshness_threshold_controls_available_only(live):
     client, session, _, _, sources = live
-    params = {"lat": 25.03, "lng": 121.56, "vehicle": "RED", "available_only": True}
+    params = {"lat": 25.03, "lng": 121.56, "vehicle": "LARGE_HEAVY", "available_only": True}
     assert len((await client.get("/api/v1/parking/nearby", params=params)).json()["items"]) == 1
     sources[2].freshness_seconds = 1
     await session.flush()
@@ -264,7 +270,7 @@ async def test_explain_spatial_index_on_representative_seed(live):
     for _ in range(20):
         start = perf_counter()
         response = await client.get(
-            "/api/v1/parking/nearby", params={"lat": 25.03, "lng": 121.56, "radius": 500, "vehicle": "RED"}
+            "/api/v1/parking/nearby", params={"lat": 25.03, "lng": 121.56, "radius": 500, "vehicle": "LARGE_HEAVY"}
         )
         assert response.status_code == 200, response.text
         timings.append((perf_counter() - start) * 1000)

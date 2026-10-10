@@ -16,7 +16,7 @@ from app.models.enums import ParkingSpaceType, RateParseStatus, RateType, Realti
 
 FIXTURES = Path(__file__).parent / "fixtures" / "taipei"
 ADAPTER = TaipeiParkingAdapter()
-YELLOW_RED = {VehicleType.YELLOW, VehicleType.RED}
+YELLOW_RED = {VehicleType.LARGE_HEAVY}
 PAYEX_0003 = "小型車：計時 30元/時，全程以半小時計，全日雙月票11,520元。"
 
 
@@ -214,11 +214,11 @@ def test_channel_mapping_dedup_and_conflicts(static_payload):
     assert len({rate.key for rate in zones["car"].rates}) == len(zones["car"].rates)
 
     motor_fares = _fares(zones["motor"])
-    assert {rate.vehicle for rate in motor_fares} == {VehicleType.GREEN, VehicleType.WHITE}
+    assert {rate.vehicle for rate in motor_fares} == {VehicleType.NORMAL_HEAVY, VehicleType.NORMAL_HEAVY}
 
     heavy_fares = _fares(zones["heavy"])
     assert {rate.vehicle for rate in heavy_fares} == YELLOW_RED
-    assert len(heavy_fares) == 6  # CM x2, HM monthly x2, HM invalid-window x2
+    assert len(heavy_fares) == 3  # One class rate each: CM, HM monthly, HM invalid-window
     assert len({rate.key for rate in zones["heavy"].rates}) == len(zones["heavy"].rates)
 
 
@@ -308,7 +308,7 @@ def test_missing_count_with_channel_creates_unknown_zone(static_payload):
     motor = zones["motor"]
     assert motor.capacity is None
     assert (motor.green, motor.white, motor.yellow, motor.red, motor.car) == (None,) * 5
-    assert {rate.vehicle for rate in motor.rates} == {VehicleType.GREEN, VehicleType.WHITE}
+    assert {rate.vehicle for rate in motor.rates} == {VehicleType.NORMAL_HEAVY, VehicleType.NORMAL_HEAVY}
     car_rates = zones["car"].rates
     assert [rate.vehicle for rate in car_rates] == [VehicleType.CAR]
     # Empty payex: no unattributed payex rate; structured raw_text falls back to the rule itself.

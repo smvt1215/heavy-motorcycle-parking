@@ -2,7 +2,7 @@
 
 The public v1 endpoints are `/parking/nearby`, `/parking/{parking_id}`,
 `/parking/{parking_id}/rates` and `/parking/{parking_id}/realtime` under
-`/api/v1`. They require explicit YELLOW or RED `vehicle`; optional `at` is an
+`/api/v1`. They require explicit NORMAL_HEAVY or LARGE_HEAVY `vehicle`; optional `at` is an
 offset-bearing RFC3339 instant. `/health` and `/version` retain their existing
 behavior. User-scoped endpoints belong to their later milestones.
 

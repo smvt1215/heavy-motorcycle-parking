@@ -32,11 +32,7 @@ class _FiltersSheetState extends State<FiltersSheet> {
               decoration: const InputDecoration(labelText: '可停放車格'),
               items: [
                 const DropdownMenuItem(value: null, child: Text('所有相容車格')),
-                for (final type in [
-                  SpaceType.heavyOnly,
-                  SpaceType.motoShared,
-                  SpaceType.carShared,
-                ])
+                for (final type in SpaceType.forVehicle(widget.query.vehicle))
                   DropdownMenuItem(value: type, child: Text(type.label)),
               ],
               onChanged: (value) => setState(() => _space = value),

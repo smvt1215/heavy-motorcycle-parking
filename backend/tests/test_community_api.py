@@ -32,7 +32,7 @@ from app.models import (
 NOW = datetime(2026, 10, 7, 4, 0, tzinfo=UTC)
 PROTECTED = [
     ("GET", "/api/v1/me", None),
-    ("PUT", "/api/v1/me/vehicle", {"vehicle": "RED"}),
+    ("PUT", "/api/v1/me/vehicle", {"vehicle": "LARGE_HEAVY"}),
     ("GET", "/api/v1/me/reports", None),
     ("GET", "/api/v1/favorites", None),
     ("POST", "/api/v1/favorites", {"parking_id": 1}),
@@ -188,9 +188,9 @@ async def test_me_identity_comes_only_from_the_token(env):
 
 async def test_vehicle_preference_is_heavy_only_and_never_drives_parking_queries(env):
     client = env["client"]
-    response = await client.put("/api/v1/me/vehicle", json={"vehicle": "YELLOW"}, headers=auth(env, "alice"))
-    assert response.status_code == 200 and response.json()["preferred_vehicle"] == "YELLOW"
-    for invalid in ("GREEN", "CAR", "PINK"):
+    response = await client.put("/api/v1/me/vehicle", json={"vehicle": "NORMAL_HEAVY"}, headers=auth(env, "alice"))
+    assert response.status_code == 200 and response.json()["preferred_vehicle"] == "NORMAL_HEAVY"
+    for invalid in ("GREEN", "WHITE", "YELLOW", "RED", "CAR", "PINK"):
         response = await client.put("/api/v1/me/vehicle", json={"vehicle": invalid}, headers=auth(env, "alice"))
         assert response.status_code == 422
     cleared = await client.put("/api/v1/me/vehicle", json={"vehicle": None}, headers=auth(env, "alice"))
@@ -413,7 +413,7 @@ async def test_storage_unavailable_keeps_no_photo_row(env):
 
 async def test_guest_can_use_public_endpoints(env):
     client, lot = env["client"], env["lots"][0]
-    assert (await client.get(f"/api/v1/parking/{lot.id}?vehicle=RED")).status_code == 200
+    assert (await client.get(f"/api/v1/parking/{lot.id}?vehicle=LARGE_HEAVY")).status_code == 200
     assert (await client.get(f"/api/v1/parking/{lot.id}/reports")).status_code == 200
     assert (await client.get("/api/v1/me")).status_code == 401
 

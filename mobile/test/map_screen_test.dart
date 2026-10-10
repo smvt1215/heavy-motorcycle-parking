@@ -82,7 +82,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(GoogleMap), findsNothing);
     expect(find.text('地圖尚未就緒\n仍可查看附近停車資訊'), findsOneWidget);
-    expect(find.text('黃牌'), findsOneWidget);
+    expect(find.text('普重'), findsOneWidget);
     expect(repository.queries, hasLength(1));
   });
 
@@ -117,13 +117,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(repository.queries, hasLength(2));
     expect(repository.queries.last.center, const GeoPoint(25.04049, 121.57));
-    await tester.tap(find.text('黃牌'));
+    await tester.tap(find.text('普重'));
     await tester.pumpAndSettle();
-    expect(repository.queries.last.vehicle, VehicleType.yellow);
+    expect(repository.queries.last.vehicle, VehicleType.normalHeavy);
     await tester.tap(find.text('目前有空位'));
     await tester.pumpAndSettle();
     expect(repository.queries.last.availableOnly, isTrue);
-    expect(repository.queries.last.vehicle, VehicleType.yellow);
+    expect(repository.queries.last.vehicle, VehicleType.normalHeavy);
   });
 
   testWidgets('hourly filter uses backend threshold and can be cleared',
@@ -218,7 +218,7 @@ void main() {
     await tester.tap(find.byTooltip('定位我的位置'));
     await tester.pumpAndSettle();
     expect(find.text('測試拒絕定位'), findsOneWidget);
-    expect(find.text('黃牌'), findsOneWidget);
+    expect(find.text('普重'), findsOneWidget);
   });
 
   testWidgets('partial summary does not synthesize child totals',
@@ -476,7 +476,7 @@ void main() {
       );
       expect(repository.queries, hasLength(2));
       expect(repository.queries.last.center, taipei101.location);
-      expect(repository.queries.last.vehicle, VehicleType.red);
+      expect(repository.queries.last.vehicle, VehicleType.largeHeavy);
       expect(config!.destination?.placeId, taipei101Id);
       expect(find.text('台北101'), findsOneWidget);
       expect(find.text('搜尋此區域'), findsNothing);

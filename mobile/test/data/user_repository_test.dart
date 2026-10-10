@@ -53,7 +53,7 @@ void main() {
               'display_name': 'rider',
               'email': null,
               'role': 'USER',
-              'preferred_vehicle': 'RED',
+              'preferred_vehicle': 'LARGE_HEAVY',
             }
           ),
         '/favorites' when o.method == 'GET' => (
@@ -74,7 +74,7 @@ void main() {
     );
     final repo = DioUserRepository(_dio(adapter));
     final me = await repo.me(token);
-    expect(me.preferredVehicle, VehicleType.red);
+    expect(me.preferredVehicle, VehicleType.largeHeavy);
     final favorites = await repo.favorites(token);
     expect(favorites.single.parkingId, 12);
     await repo.addFavorite(token, 12);

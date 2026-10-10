@@ -5,11 +5,11 @@ EVALUATION_AT = datetime(2026, 10, 5, 4, 0, tzinfo=UTC)
 # The winning tier deliberately contains contradictory and unknown facts. Never
 # identify a logical upstream rule using just its precedence tuple.
 RULE_CASES = (
-    {"scope": "lot", "rule_kind": "BASELINE", "authority_priority": 10, "red_plate_allowed": True},
-    {"scope": "zone", "rule_kind": "BASELINE", "authority_priority": 10, "red_plate_allowed": True},
-    {"scope": "zone", "rule_kind": "EXCEPTION", "authority_priority": 20, "red_plate_allowed": True},
-    {"scope": "zone", "rule_kind": "EXCEPTION", "authority_priority": 20, "red_plate_allowed": False},
-    {"scope": "zone", "rule_kind": "EXCEPTION", "authority_priority": 20, "red_plate_allowed": None},
+    {"scope": "lot", "rule_kind": "BASELINE", "authority_priority": 10, "large_heavy_allowed": True},
+    {"scope": "zone", "rule_kind": "BASELINE", "authority_priority": 10, "large_heavy_allowed": True},
+    {"scope": "zone", "rule_kind": "EXCEPTION", "authority_priority": 20, "large_heavy_allowed": True},
+    {"scope": "zone", "rule_kind": "EXCEPTION", "authority_priority": 20, "large_heavy_allowed": False},
+    {"scope": "zone", "rule_kind": "EXCEPTION", "authority_priority": 20, "large_heavy_allowed": None},
 )
 
 MIXED_REALTIME_CASES = (

@@ -212,11 +212,13 @@ async def test_import_normalizes_sources_rules_rates_and_realtime(live):
 
         rules = (await session.scalars(select(ParkingRule).where(ParkingRule.parking_id == lot.id))).all()
         assert all(r.source_record_id.startswith("new_taipei:rule:") for r in rules)
-        assert all(r.yellow_plate_allowed is None and r.red_plate_allowed is None for r in rules)
+        assert all(r.normal_heavy_allowed is None and r.large_heavy_allowed is None for r in rules)
 
         detail = await ParkingRepository(session).detail(lot.id)
         compat = ParkingCompatibilityService()
-        statuses = {z.facts.space_type: compat.evaluate(detail.facts, z.facts, "RED", NOW).status for z in detail.zones}
+        statuses = {
+            z.facts.space_type: compat.evaluate(detail.facts, z.facts, "LARGE_HEAVY", NOW).status for z in detail.zones
+        }
         assert statuses == {"CAR_SHARED": "UNKNOWN", "HEAVY_ONLY": "UNKNOWN"}
         car = next(z for z in detail.zones if z.facts.space_type == "CAR_SHARED")
         availability = resolve_availability(car.realtime, NOW + timedelta(seconds=60))
@@ -393,7 +395,7 @@ async def test_same_nearby_api_returns_taipei_and_new_taipei_records(live):
         yield session
 
     app.dependency_overrides[get_session] = override_session
-    query = {"lat": 25.0585, "lng": 121.5596, "radius": 1500, "vehicle": "RED"}
+    query = {"lat": 25.0585, "lng": 121.5596, "radius": 1500, "vehicle": "LARGE_HEAVY"}
     async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
         confirmed = (await client.get("/api/v1/parking/nearby", params=query)).json()
         included = (await client.get("/api/v1/parking/nearby", params={**query, "include_unknown": True})).json()

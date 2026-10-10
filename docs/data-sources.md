@@ -19,7 +19,7 @@ Device-local recent searches cache Google coordinates for at most 30 days.
 
 M7 adds the [New Taipei paged feeds](new-taipei-ingestion.md) through the same
 worker. New Taipei publishes no heavy-motorcycle counts, so its lots stay UNKNOWN
-for YELLOW/RED.
+for LARGE_HEAVY; conventional motorcycle zones may confirm NORMAL_HEAVY.
 
 ## Adapter contract
 Create `BaseParkingAdapter`, then `TaipeiParkingAdapter` and `NewTaipeiParkingAdapter`. City-specific parsing stays outside core domain logic.

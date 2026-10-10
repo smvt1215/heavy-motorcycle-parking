@@ -30,7 +30,7 @@
 `HEAVY_ONLY`, `MOTO_SHARED`, `CAR_SHARED`, `LIGHT_MOTO_ONLY`.
 
 ## Tri-state permissions
-`green_plate_allowed`, `white_plate_allowed`, `yellow_plate_allowed`, `red_plate_allowed`, `car_allowed` are nullable booleans. NULL means unknown.
+`normal_heavy_allowed`, `large_heavy_allowed` are nullable class-level booleans. NULL means unknown. Historical plate/car permission columns remain source evidence and do not decide class permission.
 
 Effective API compatibility is `ALLOWED`, `NOT_ALLOWED`, or `UNKNOWN`; database NULL must remain distinguishable from confirmed false.
 
@@ -191,3 +191,7 @@ Import batches add nullable `feed_kind`, JSONB `raw_payload`, `source_updated_at
 and `fetched_at`. Complete source envelopes and malformed-JSON byte evidence are
 retained independently of normalized transactions. No new tables or enum labels
 are added; downgrading restores the M1 schema while retaining existing rows.
+
+## Development vehicle contract (005)
+
+005 adds NULL class permissions, preserves historical plate evidence and archives old enum values in legacy columns. It leaves saved preferences/vehicles unset rather than migrating user data. Existing plate-specific rates remain vehicle-NULL until reimport; internal CAR source tariffs stay CAR. Up/down preserves preexisting rows. New enum labels: NORMAL_HEAVY, LARGE_HEAVY, internal CAR (never public).

@@ -137,10 +137,10 @@ void main() {
     await pumpMap(tester);
     await tester.tap(find.byTooltip('我的帳號'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('黃牌').last);
+    await tester.tap(find.text('普重').last);
     await tester.pumpAndSettle();
-    expect(users.preferred?.wireValue, 'YELLOW');
-    expect(parking.queries.last.vehicle.wireValue, 'YELLOW');
+    expect(users.preferred?.wireValue, 'NORMAL_HEAVY');
+    expect(parking.queries.last.vehicle.wireValue, 'NORMAL_HEAVY');
 
     await tester.tap(find.text('登出'));
     await tester.pumpAndSettle();

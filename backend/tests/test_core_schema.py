@@ -165,9 +165,9 @@ def test_rule_tiers_preserve_conflicts_nulls_and_provenance(db, tables, evidence
     rows = db.execute(select(rules).order_by(rules.c.id)).mappings().all()
     assert len(rows) == 5
     assert rows[0]["zone_id"] is None
-    assert [row["red_plate_allowed"] for row in rows[2:]] == [True, False, None]
+    assert [row["large_heavy_allowed"] for row in rows[2:]] == [True, False, None]
     for row in rows:
-        assert row["yellow_plate_allowed"] is None
+        assert row["normal_heavy_allowed"] is None
         assert row["green_plate_allowed"] is None
         assert row["white_plate_allowed"] is None
         assert row["car_allowed"] is None
@@ -176,7 +176,7 @@ def test_rule_tiers_preserve_conflicts_nulls_and_provenance(db, tables, evidence
         assert row["source_record_id"]
 
 
-@pytest.mark.parametrize("vehicle", ["GREEN", "WHITE", "YELLOW", "RED", "CAR"])
+@pytest.mark.parametrize("vehicle", ["NORMAL_HEAVY", "LARGE_HEAVY"])
 @pytest.mark.parametrize("uncertain_schedule", [False, True])
 def test_persisted_rule_fixture_preserves_unknown_in_domain_service(db, tables, evidence, vehicle, uncertain_schedule):
     schedule = (
@@ -215,11 +215,8 @@ def test_persisted_rule_fixture_preserves_unknown_in_domain_service(db, tables, 
                 rule_kind=row["rule_kind"],
                 authority_priority=row["authority_priority"],
                 active=row["active"],
-                green_plate_allowed=row["green_plate_allowed"],
-                white_plate_allowed=row["white_plate_allowed"],
-                yellow_plate_allowed=row["yellow_plate_allowed"],
-                red_plate_allowed=row["red_plate_allowed"],
-                car_allowed=row["car_allowed"],
+                normal_heavy_allowed=row["normal_heavy_allowed"],
+                large_heavy_allowed=row["large_heavy_allowed"],
                 effective_from=row["effective_from"],
                 effective_to=row["effective_to"],
                 schedule=row["schedule"],
@@ -243,7 +240,7 @@ def test_persisted_rule_fixture_preserves_unknown_in_domain_service(db, tables, 
     expected_reason = (
         "schedule_unknown"
         if uncertain_schedule
-        else ("conflicting_permissions" if vehicle == "RED" else "unknown_permission")
+        else ("conflicting_permissions" if vehicle == "LARGE_HEAVY" else "unknown_permission")
     )
     assert result.reason == expected_reason
 
@@ -418,7 +415,7 @@ def graph(db, tables, evidence):
         "raw_import_batches": {"source_id": source},
         "raw_parking_records": {"batch_id": batch, "source_id": source, "payload": {}},
         "users": {"auth_subject": "another-subject"},
-        "user_vehicles": {"user_id": user, "vehicle_type": "RED"},
+        "user_vehicles": {"user_id": user, "vehicle_type": "LARGE_HEAVY"},
         "favorites": {"user_id": user, "parking_id": lot},
         "user_reports": {"user_id": user, "parking_id": lot, "zone_id": zone, "report_type": "OTHER"},
         "report_photos": {"report_id": report, "storage_key": "test/photo.jpg"},
@@ -464,7 +461,7 @@ def test_business_uniqueness(db, tables, graph, table_name, constraint):
     "enum_name, labels",
     [
         ("parking_space_type", ["HEAVY_ONLY", "MOTO_SHARED", "CAR_SHARED", "LIGHT_MOTO_ONLY"]),
-        ("vehicle_type", ["GREEN", "WHITE", "YELLOW", "RED", "CAR"]),
+        ("vehicle_type", ["NORMAL_HEAVY", "LARGE_HEAVY", "CAR"]),
         ("parking_rule_kind", ["BASELINE", "EXCEPTION"]),
         (
             "parking_rate_type",
@@ -534,7 +531,7 @@ def test_all_rate_types_with_exact_money(db, tables, evidence, rate_type):
         rate_type=rate_type,
         parse_status="PARSED",
         base_amount=Decimal("20.15"),
-        vehicle_type="RED",
+        vehicle_type="LARGE_HEAVY",
     )
     amount = db.execute(select(tables["parking_rates"].c.base_amount).where(tables["parking_rates"].c.id == rate))
     assert amount.scalar_one() == Decimal("20.15")
@@ -585,7 +582,7 @@ def test_aging_retains_observed_status(db, tables, evidence, status, available):
 
 @pytest.mark.parametrize(
     "permission",
-    ["green_plate_allowed", "white_plate_allowed", "yellow_plate_allowed", "red_plate_allowed", "car_allowed"],
+    ["green_plate_allowed", "white_plate_allowed", "normal_heavy_allowed", "large_heavy_allowed", "car_allowed"],
 )
 def test_every_vehicle_permission_roundtrips_three_states(db, tables, graph, permission):
     rules = tables["parking_rules"]

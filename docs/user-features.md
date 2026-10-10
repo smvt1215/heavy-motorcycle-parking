@@ -29,7 +29,7 @@ public parking, search and detail feature.
 
 ## Preferred vehicle
 
-`PUT /api/v1/me/vehicle {"vehicle": "YELLOW" | "RED" | null}`. The app uses it only to
+`PUT /api/v1/me/vehicle {"vehicle": "NORMAL_HEAVY" | "LARGE_HEAVY" | null}`. The app uses it only to
 seed the map's selected vehicle; every selected-vehicle request still sends an
 explicit `vehicle`, and the server never reads the preference (AGENTS rule 13).
 
@@ -114,7 +114,7 @@ most 3 per report, `REPORT_PHOTO_MAX_BYTES` default 5 MB):
   Existing rows map RATE/AVAILABILITY/ENTRANCE corrections to their WRONG_* types,
   CLOSURE to CLOSED, ACCEPTED to VERIFIED and UNDER_REVIEW to PENDING; anything
   else becomes OTHER / PENDING. The downgrade maps back the same way.
-- `users.role` (USER/MODERATOR) and `users.preferred_vehicle` (YELLOW/RED/NULL).
+- `users.role` (USER/MODERATOR) and `users.preferred_vehicle` (NORMAL_HEAVY/LARGE_HEAVY/NULL).
 - `user_reports.resolved_by_user_id` (SET NULL on user deletion).
 - New `access_tokens` table (unique digest, expiry after creation, cascade on user
   deletion).

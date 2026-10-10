@@ -68,9 +68,9 @@ python -m app.ingestion.cli --feed all \
 
 | Source evidence | Normalized fact | Heavy vehicle policy |
 | --- | --- | --- |
-| Positive `totalcar` | `car` / CAR_SHARED | CAR true; YELLOW/RED NULL |
-| Positive `totalmotor` | `motor` / MOTO_SHARED | GREEN/WHITE true; YELLOW/RED NULL |
-| Positive `totallargemotor` | `heavy` / HEAVY_ONLY | Explicit dedicated heavy category confirms YELLOW/RED true |
+| Positive `totalcar` | `car` / CAR_SHARED | CAR true; LARGE_HEAVY NULL |
+| Positive `totalmotor` | `motor` / MOTO_SHARED | NORMAL_HEAVY true; LARGE_HEAVY NULL |
+| Positive `totallargemotor` | `heavy` / HEAVY_ONLY | Explicit dedicated heavy category confirms LARGE_HEAVY true |
 | Missing category count with matching fare channel | Capacity-NULL zone | All permissions NULL |
 | Zero category count | No new zone | Never converted into false permission |
 | `tw97x`, `tw97y` | Lot center: EPSG:3826 -> EPSG:4326 via pyproj | No entrance-coordinate fallback |
@@ -121,8 +121,8 @@ guessed. `00`–`24` means unrestricted; a terminal `24` becomes midnight; overn
 windows remain separate rules. Unknown types remain raw and malformed amounts or
 windows become INVALID.
 
-`C` fees apply only to CAR, `M` only GREEN/WHITE, `HM` only YELLOW/RED on a heavy
-zone, and `CM` to CAR plus YELLOW/RED on an existing heavy zone. Fare fields never
+`C` fees apply only to CAR, `M` only NORMAL_HEAVY, `HM` only LARGE_HEAVY on a heavy
+zone, and `CM` to CAR plus LARGE_HEAVY on an existing heavy zone. Fare fields never
 grant legality. Bus `T` and charging `RateType=9` are not parking prices. Exact
 duplicate fare entries collapse; distinct conflicting entries remain independent.
 

@@ -29,22 +29,19 @@ REASON_SCHEDULE_UNKNOWN = "schedule_unknown"
 REASON_SPACE_TYPE_DEFAULT = "space_type_default"
 
 _PERMISSION_FIELDS: dict[str, str] = {
-    "GREEN": "green_plate_allowed",
-    "WHITE": "white_plate_allowed",
-    "YELLOW": "yellow_plate_allowed",
-    "RED": "red_plate_allowed",
-    "CAR": "car_allowed",
+    "NORMAL_HEAVY": "normal_heavy_allowed",
+    "LARGE_HEAVY": "large_heavy_allowed",
 }
 
-# Normative space-type defaults, used only when no rule applies at all.
+# Descriptive defaults apply only when no explicit rule exists.
 _SPACE_TYPE_DEFAULTS: dict[str, frozenset[str]] = {
-    "HEAVY_ONLY": frozenset({"YELLOW", "RED"}),
-    "MOTO_SHARED": frozenset({"GREEN", "WHITE", "YELLOW", "RED"}),
-    "CAR_SHARED": frozenset({"YELLOW", "RED", "CAR"}),
-    "LIGHT_MOTO_ONLY": frozenset({"GREEN", "WHITE"}),
+    "HEAVY_ONLY": frozenset({"LARGE_HEAVY"}),
+    "MOTO_SHARED": frozenset({"NORMAL_HEAVY", "LARGE_HEAVY"}),
+    "CAR_SHARED": frozenset({"LARGE_HEAVY"}),
+    "LIGHT_MOTO_ONLY": frozenset({"NORMAL_HEAVY"}),
 }
 
-_HEAVY_VEHICLES = frozenset({"YELLOW", "RED"})
+_HEAVY_VEHICLES = frozenset({"LARGE_HEAVY"})
 
 
 class CompatibilityStatus(StrEnum):

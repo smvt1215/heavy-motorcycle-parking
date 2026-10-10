@@ -6,16 +6,15 @@ import '../domain/parking.dart';
 /// Material seed and for the app's single brand mark.
 const Color parkingSignBlue = Color(0xFF0B5CAD);
 
-/// License-plate colors for the vehicle selector. They are always paired with
-/// the 黃牌/紅牌 label, never used alone to convey the selection.
+/// Class colors reinforce the 普重/大重 labels; 大重 includes both yellow and red plates.
 ({Color background, Color foreground}) plateColors(VehicleType vehicle) =>
     switch (vehicle) {
-      VehicleType.yellow => (
-          background: const Color(0xFFF2B705),
+      VehicleType.normalHeavy => (
+          background: Colors.white,
           foreground: const Color(0xFF1A1A1A),
         ),
-      VehicleType.red => (
-          background: const Color(0xFFC8102E),
+      VehicleType.largeHeavy => (
+          background: parkingSignBlue,
           foreground: Colors.white,
         ),
     };

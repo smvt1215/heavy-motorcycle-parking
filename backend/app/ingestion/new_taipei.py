@@ -12,11 +12,11 @@ Conservative mapping policy (same normalized contract as Taipei):
   no entrance coordinates, so no entrance is created.
 * Counts: `TOTALCAR` -> car (CAR_SHARED, car=TRUE), `TOTALMOTOR` -> motor
   (MOTO_SHARED, green/white=TRUE). Only a positive count grants those
-  permissions; YELLOW/RED always stay NULL because generic car/motor counts do
+  permissions; LARGE_HEAVY always stay NULL because generic car/motor counts do
   not say whether heavy motorcycles may use them. `""` means missing; a zero
   omits the zone. There is no heavy-motorcycle count field.
 * `PAYEX` is `;`-separated `<vehicle><terms>` segments. `小型車` -> CAR on car,
-  `機車` -> GREEN/WHITE on motor, `重型機車` -> YELLOW/RED on heavy. A missing
+  `機車` -> NORMAL_HEAVY on motor, `重型機車` -> LARGE_HEAVY on heavy. A missing
   count with a matching fee channel creates a capacity-NULL zone with all-NULL
   permissions; a `重型機車` fee therefore yields an UNKNOWN heavy zone and never
   confirms that heavy motorcycles may park there. `身障車`/`身障機車` (permit
@@ -62,16 +62,16 @@ _ZONE_TYPES = {
 }
 _POSITIVE_PERMISSIONS: dict[str, dict[str, bool]] = {
     CAR: {"car": True},
-    MOTOR: {"green": True, "white": True},
+    MOTOR: {"normal_heavy": True, "green": True, "white": True},
 }
 # Longest labels first so 重型機車/身障機車 are never read as 機車.
 _LABELS: tuple[tuple[str, tuple[tuple[str, VehicleType], ...]], ...] = (
     ("身障機車", ()),
-    ("重型機車", ((HEAVY, VehicleType.YELLOW), (HEAVY, VehicleType.RED))),
+    ("重型機車", ((HEAVY, VehicleType.LARGE_HEAVY),)),
     ("身障車", ()),
     ("大型車", ()),
     ("小型車", ((CAR, VehicleType.CAR),)),
-    ("機車", ((MOTOR, VehicleType.GREEN), (MOTOR, VehicleType.WHITE))),
+    ("機車", ((MOTOR, VehicleType.NORMAL_HEAVY),)),
 )
 _SEGMENT_SPLIT = re.compile(r"[;；]")
 MAX_TEXT = 200

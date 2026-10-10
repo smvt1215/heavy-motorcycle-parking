@@ -18,8 +18,9 @@ stored in parking tables, and never used for legality, rates or availability.
 Device-local recent searches cache Google coordinates for at most 30 days.
 
 M7 adds the [New Taipei paged feeds](new-taipei-ingestion.md) through the same
-worker. New Taipei publishes no heavy-motorcycle counts, so its lots stay UNKNOWN
-for LARGE_HEAVY; conventional motorcycle zones may confirm NORMAL_HEAVY.
+worker. Confirmed ordinary motorcycle zones support NORMAL_HEAVY.
+[Reviewed twin-city policies and New Taipei roadside ingestion](twin-city-policy.md)
+add LARGE_HEAVY permission only inside verified scope; all other permissions stay UNKNOWN.
 
 ## Adapter contract
 Create `BaseParkingAdapter`, then `TaipeiParkingAdapter` and `NewTaipeiParkingAdapter`. City-specific parsing stays outside core domain logic.

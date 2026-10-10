@@ -12,8 +12,8 @@ Conservative mapping policy (same normalized contract as Taipei):
   no entrance coordinates, so no entrance is created.
 * Counts: `TOTALCAR` -> car (CAR_SHARED, car=TRUE), `TOTALMOTOR` -> motor
   (MOTO_SHARED, green/white=TRUE). Only a positive count grants those
-  permissions; LARGE_HEAVY always stay NULL because generic car/motor counts do
-  not say whether heavy motorcycles may use them. `""` means missing; a zero
+  permissions; LARGE_HEAVY baseline stays NULL because generic counts do not establish it.
+  A separate official policy rule grants only exactly verified managed public car zones. `""` means missing; a zero
   omits the zone. There is no heavy-motorcycle count field.
 * `PAYEX` is `;`-separated `<vehicle><terms>` segments. `小型車` -> CAR on car,
   `機車` -> NORMAL_HEAVY on motor, `重型機車` -> LARGE_HEAVY on heavy. A missing
@@ -45,6 +45,7 @@ from app.ingestion.contracts import (
     NormalizedZone,
     RecordError,
 )
+from app.ingestion.policies import MANAGED_FACILITIES, NEW_TAIPEI_PUBLIC_CAR, managed_facility, policy_rule
 from app.ingestion.rate_parser import parse_rate_text
 from app.ingestion.sources import NEW_TAIPEI
 from app.models.enums import ParkingSpaceType, RealtimeStatus, VehicleType
@@ -196,6 +197,31 @@ class NewTaipeiParkingAdapter(BaseParkingAdapter):
                     )
                 )
 
+        normalized_zones = [_zone(zone, capacities[zone], tuple(rates[zone])) for zone in present]
+        verified = managed_facility(rec)
+        if verified is not None:
+            normalized_zones = [
+                replace(
+                    zone,
+                    rules=(
+                        policy_rule(
+                            NEW_TAIPEI_PUBLIC_CAR,
+                            zone,
+                            evidence={
+                                "facility": verified,
+                                "roster_url": MANAGED_FACILITIES["roster_url"],
+                                "roster_sha256": MANAGED_FACILITIES["roster_sha256"],
+                                "roster_published_at": MANAGED_FACILITIES["roster_published_at"],
+                                "mapping_verified_at": MANAGED_FACILITIES["verified_at"],
+                            },
+                        ),
+                    ),
+                )
+                if zone.key == CAR and zone.car is True
+                else zone
+                for zone in normalized_zones
+            ]
+
         return NormalizedLot(
             external_id=external_id,
             name=name,
@@ -203,7 +229,7 @@ class NewTaipeiParkingAdapter(BaseParkingAdapter):
             district=district,
             lat=lat,
             lng=lng,
-            zones=tuple(_zone(zone, capacities[zone], tuple(rates[zone])) for zone in present),
+            zones=tuple(normalized_zones),
         )
 
     def normalize_realtime(self, record: Any) -> NormalizedRealtime:

@@ -5,7 +5,15 @@ from datetime import datetime, time
 from decimal import Decimal
 from typing import Any
 
-from app.models.enums import ParkingSpaceType, RateDayType, RateParseStatus, RateType, RealtimeStatus, VehicleType
+from app.models.enums import (
+    ParkingSpaceType,
+    RateDayType,
+    RateParseStatus,
+    RateType,
+    RealtimeStatus,
+    RuleKind,
+    VehicleType,
+)
 
 
 class RecordError(ValueError):
@@ -45,6 +53,21 @@ class NormalizedRate:
     vehicle: VehicleType | None
     parsed: ParsedRate
     raw_payload: dict[str, Any] = field(default_factory=dict)
+    policy_code: str | None = None
+    effective_from: datetime | None = None
+
+
+@dataclass(frozen=True)
+class NormalizedRule:
+    key: str
+    policy_code: str
+    normal_heavy: bool | None
+    large_heavy: bool | None
+    rule_kind: RuleKind
+    authority_priority: int
+    effective_from: datetime
+    schedule: dict[str, Any] | None = None
+    evidence: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -61,6 +84,7 @@ class NormalizedZone:
     red: bool | None = None
     car: bool | None = None
     rates: tuple[NormalizedRate, ...] = ()
+    rules: tuple[NormalizedRule, ...] = ()
 
 
 @dataclass(frozen=True)

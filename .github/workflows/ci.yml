@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   backend:
@@ -69,7 +68,7 @@ jobs:
         run: docker build -t heavy-parking-api:ci backend
       - name: Smoke-test API image
         run: |
-          docker run --rm --workdir /tmp heavy-parking-api:ci python -c "import app.main; import app.services; import app.ingestion.taipei; from app.domain.schedules import TAIPEI; print(TAIPEI)"
+          docker run --rm --workdir /tmp heavy-parking-api:ci python -c "import app.main; import app.services; import app.ingestion.taipei; import app.ingestion.policies; import app.ingestion.new_taipei_roadside; from app.domain.schedules import TAIPEI; print(TAIPEI)"
           docker run --rm --workdir /tmp heavy-parking-api:ci python -m app.ingestion.cli --help
 
   mobile:

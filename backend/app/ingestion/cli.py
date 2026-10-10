@@ -14,10 +14,15 @@ from app.db import get_db_engine, get_sessionmaker
 from app.ingestion.contracts import FeedSnapshot
 from app.ingestion.downloader import DownloadError, ParkingDownloader, decode_json
 from app.ingestion.new_taipei import NewTaipeiParkingAdapter
+from app.ingestion.new_taipei_roadside import NewTaipeiRoadsideAdapter
 from app.ingestion.pipeline import ParkingIngestionPipeline
 from app.ingestion.taipei import TaipeiParkingAdapter
 
-ADAPTERS = {"taipei": TaipeiParkingAdapter, "new_taipei": NewTaipeiParkingAdapter}
+ADAPTERS = {
+    "taipei": TaipeiParkingAdapter,
+    "new_taipei": NewTaipeiParkingAdapter,
+    "new_taipei_roadside": NewTaipeiRoadsideAdapter,
+}
 
 
 def parser() -> argparse.ArgumentParser:

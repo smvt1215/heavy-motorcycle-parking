@@ -82,6 +82,7 @@
 | [新北交通局 OpenAPI](https://data.ntpc.gov.tw/openapi/swagger-ui/index.html?configUrl=%2Fapi%2Fv1%2Fopenapi%2Fswagger%2Fconfig&urls.primaryName=%E6%96%B0%E5%8C%97%E5%B8%82%E6%94%BF%E5%BA%9C%E4%BA%A4%E9%80%9A%E5%B1%80%2838%29)（38 個資料集） | 只有各資料集的 csv／json／xml 端點與 `page`／`size` 參數 | — | 回應格式沒有定義任何欄位，**仍然查不到** `parkingstatus`／`cellstatus` 的代碼意義 |
 | [新北市機車停車彎資訊](https://data.ntpc.gov.tw/datasets/68243cc9-706e-4bf5-96ba-979e0b90d1aa)（每季更新） | 2,813 處停車彎；欄位有說明：`motorcycle_parking_bay_length` 停車彎長度（m）、`parking_lots1quantity` 機車格位數、`2` 身障機車、`3` 汽車、`4` 身障汽車 | 路邊機車格的實際位置與格數線索 | 只有地址、沒有座標（不能用 Google Places 寫入停車資料表）；沒有收費資訊，不能證明屬於「收費機車格」政策範圍 |
 | 新北市政府路邊收費停管場 | 6 個停管場的地址與電話 | — | 不是停車位資料 |
+| data.taipei Open API 清單（13 項，2026-10-10 下載） | 圖書館座位、水利處抽水站／雨量／水位／CCTV、北水處水質與用水量、消防局 EOC、社會住宅、輪行臺北設施、景點統計 | — | 沒有停車相關的 API |
 
 結論：要把臺北 443 個收費機車路段與新北的路邊機車格接上座標，最可靠的路徑是 TDX 的 `ParkingSegment`（路段與幾何）、`ParkingSegmentSpace`（依 `SpaceType` 的格數）與 `ParkingSegmentRate`／`ChargeTime`。接入前要先比對 TDX 與上表官方資料的路段是否一致。
 

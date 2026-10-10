@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     s3_region: str = "ap-northeast-1"
     s3_access_key_id: SecretStr | None = None
     s3_secret_access_key: SecretStr | None = None
-    report_photo_max_bytes: int = Field(default=5_000_000, ge=1, le=20_000_000)
+    report_photo_max_bytes: int = Field(default=15_000_000, ge=1, le=20_000_000)
 
     @field_validator(
         "google_places_api_key",

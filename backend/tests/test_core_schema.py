@@ -44,6 +44,17 @@ TABLES = {
     "user_reports",
     "report_photos",
     "access_tokens",
+    "community_participants",
+    "source_verifications",
+    "community_cases",
+    "community_case_revisions",
+    "community_case_stances",
+    "community_evidence_photos",
+    "community_prechecks",
+    "community_precheck_results",
+    "community_case_events",
+    "contribution_ledger",
+    "idempotency_records",
 }
 
 

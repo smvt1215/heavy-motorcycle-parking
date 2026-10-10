@@ -1,6 +1,19 @@
 """ORM models. Importing this package registers every table on `Base.metadata` (used by Alembic)."""
 
 from app.models.base import Base
+from app.models.community import (
+    CommunityCase,
+    CommunityCaseEvent,
+    CommunityCaseRevision,
+    CommunityCaseStance,
+    CommunityEvidencePhoto,
+    CommunityParticipant,
+    CommunityPrecheck,
+    CommunityPrecheckResult,
+    ContributionLedgerEntry,
+    IdempotencyRecord,
+    SourceVerification,
+)
 from app.models.data_source import DataSource
 from app.models.enums import (
     DataSourceType,
@@ -27,10 +40,20 @@ from app.models.user import AccessToken, Favorite, ReportPhoto, User, UserReport
 __all__ = [
     "AccessToken",
     "Base",
+    "CommunityCase",
+    "CommunityCaseEvent",
+    "CommunityCaseRevision",
+    "CommunityCaseStance",
+    "CommunityEvidencePhoto",
+    "CommunityParticipant",
+    "CommunityPrecheck",
+    "CommunityPrecheckResult",
+    "ContributionLedgerEntry",
     "DataSource",
     "DataSourceType",
     "EntranceType",
     "Favorite",
+    "IdempotencyRecord",
     "ImportBatchStatus",
     "ParkingEntrance",
     "ParkingFacility",
@@ -53,6 +76,7 @@ __all__ = [
     "ReportStatus",
     "ReportType",
     "RuleKind",
+    "SourceVerification",
     "User",
     "UserReport",
     "UserRole",

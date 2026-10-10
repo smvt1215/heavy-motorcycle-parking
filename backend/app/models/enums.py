@@ -24,10 +24,8 @@ class ParkingSpaceType(StrEnum):
 
 
 class VehicleType(StrEnum):
-    GREEN = "GREEN"
-    WHITE = "WHITE"
-    YELLOW = "YELLOW"
-    RED = "RED"
+    NORMAL_HEAVY = "NORMAL_HEAVY"
+    LARGE_HEAVY = "LARGE_HEAVY"
     CAR = "CAR"
 
 

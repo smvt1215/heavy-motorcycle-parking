@@ -50,8 +50,8 @@ keeps its complete-snapshot semantics.
 
 | Source evidence | Normalized fact | Heavy vehicle policy |
 | --- | --- | --- |
-| Positive `TOTALCAR` | `car` / CAR_SHARED | CAR true; YELLOW/RED NULL |
-| Positive `TOTALMOTOR` | `motor` / MOTO_SHARED | GREEN/WHITE true; YELLOW/RED NULL |
+| Positive `TOTALCAR` | `car` / CAR_SHARED | CAR true; LARGE_HEAVY NULL |
+| Positive `TOTALMOTOR` | `motor` / MOTO_SHARED | NORMAL_HEAVY true; LARGE_HEAVY NULL |
 | `重型機車` fee segment | Capacity-NULL `heavy` / HEAVY_ONLY | All permissions NULL: a fee never grants legality |
 | Missing (`""`) count with matching fee segment | Capacity-NULL zone | All permissions NULL |
 | Zero count | No zone | Never NOT_ALLOWED |
@@ -59,11 +59,11 @@ keeps its complete-snapshot semantics.
 | `AVAILABLECAR` | Car observation | `-9`/missing => UNKNOWN; heavy counts never derived |
 
 There is no heavy-motorcycle count field, so every New Taipei lot is UNKNOWN for
-YELLOW/RED. It appears in nearby results only with `include_unknown=true`, labelled
+NORMAL_HEAVY/LARGE_HEAVY. It appears in nearby results only with `include_unknown=true`, labelled
 unverified and ranked after confirmed results. This is deliberate (AGENTS rules 7–9).
 
-`PAYEX` is split on `;`. `小型車` -> CAR on car, `機車` -> GREEN/WHITE on motor,
-`重型機車` -> YELLOW/RED on heavy. `身障車`, `身障機車` (permit holders), `大型車`
+`PAYEX` is split on `;`. `小型車` -> CAR on car, `機車` -> NORMAL_HEAVY on motor,
+`重型機車` -> LARGE_HEAVY on heavy. `身障車`, `身障機車` (permit holders), `大型車`
 (bus/truck) and unlabelled segments are not selected-vehicle prices. Segment terms
 use the shared conservative text parser. `計時N元` states no time unit, so it stays
 PARTIALLY_PARSED with no comparison value; `月租`, `計次` and `免費` parse fully.

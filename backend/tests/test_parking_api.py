@@ -43,8 +43,8 @@ def make_lot(parking_id=1, permissions=(True,), space_types=None, distance=0, **
                 "BASELINE",
                 1,
                 source(),
-                red_plate_allowed=permission,
-                yellow_plate_allowed=permission,
+                large_heavy_allowed=permission,
+                normal_heavy_allowed=permission,
                 **rule_fields,
             )
         )
@@ -77,10 +77,10 @@ async def api():
 
 
 def query(**fields):
-    return {"lat": 25.03, "lng": 121.56, "vehicle": "RED", **fields}
+    return {"lat": 25.03, "lng": 121.56, "vehicle": "LARGE_HEAVY", **fields}
 
 
-@pytest.mark.parametrize("vehicle", ["RED", "YELLOW"])
+@pytest.mark.parametrize("vehicle", ["LARGE_HEAVY", "NORMAL_HEAVY"])
 async def test_nearby_tristate_rollup_and_light_exclusion(api, vehicle):
     client, repository, _ = api
     repository.lots = (
@@ -90,14 +90,14 @@ async def test_nearby_tristate_rollup_and_light_exclusion(api, vehicle):
         make_lot(4, (True,), ("LIGHT_MOTO_ONLY",)),
     )
     default = (await client.get("/api/v1/parking/nearby", params=query(vehicle=vehicle))).json()
-    assert [lot["id"] for lot in default["items"]] == [1]
+    assert {lot["id"] for lot in default["items"]} == ({1} if vehicle == "LARGE_HEAVY" else {1, 4})
     assert [zone["compatibility"]["status"] for zone in default["items"][0]["zones"]] == ["ALLOWED"]
     included = (await client.get("/api/v1/parking/nearby", params=query(vehicle=vehicle, include_unknown=True))).json()
-    assert [lot["id"] for lot in included["items"]] == [1, 2]
+    assert {lot["id"] for lot in included["items"]} == ({1, 2} if vehicle == "LARGE_HEAVY" else {1, 2, 4})
     assert included["items"][0]["compatibility"]["status"] == "ALLOWED"
     assert [zone["compatibility"]["status"] for zone in included["items"][0]["zones"]] == ["ALLOWED", "UNKNOWN"]
-    assert included["items"][1]["compatibility"]["status"] == "UNKNOWN"
-    assert included["items"][1]["ranking_score_bp"] is None
+    assert included["items"][-1]["compatibility"]["status"] == "UNKNOWN"
+    assert included["items"][-1]["ranking_score_bp"] is None
     assert repository.queries[0] == (25.03, 121.56, 1500)
 
 
@@ -105,13 +105,13 @@ async def test_nearby_tristate_rollup_and_light_exclusion(api, vehicle):
 async def test_specialized_zones_have_same_base_and_zone_scoped_evidence(api, suffix):
     client, repository, _ = api
     lot = make_lot(1, (True, None))
-    rate = RateFact(7, 100, "RED", "HOURLY", "PARSED", source(2), base_amount=Decimal(20), unit_minutes=60)
+    rate = RateFact(7, 100, "LARGE_HEAVY", "HOURLY", "PARSED", source(2), base_amount=Decimal(20), unit_minutes=60)
     rt = RealtimeFact(8, 100, "AVAILABLE", 3, 10, source(3))
     entrance = EntranceFact(9, "Entry", 25.031, 121.561, "UNKNOWN", source(4))
     repository.lots = (
         replace(lot, zones=(replace(lot.zones[0], rates=(rate,), realtime=rt), lot.zones[1]), entrances=(entrance,)),
     )
-    response = await client.get(f"/api/v1/parking/1{suffix}", params={"vehicle": "RED", "at": NOW.isoformat()})
+    response = await client.get(f"/api/v1/parking/1{suffix}", params={"vehicle": "LARGE_HEAVY", "at": NOW.isoformat()})
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["evaluation_at"] == "2026-10-05T04:00:00Z"
@@ -138,11 +138,11 @@ async def test_highest_rule_ties_preserve_every_source_in_api(api, permissions):
     client, repository, _ = api
     lot = make_lot()
     top = tuple(
-        RuleFact(i + 10, 1, 100, "EXCEPTION", 100, source(i + 2), red_plate_allowed=permission)
+        RuleFact(i + 10, 1, 100, "EXCEPTION", 100, source(i + 2), large_heavy_allowed=permission)
         for i, permission in enumerate(permissions)
     )
     repository.lots = (replace(lot, facts=replace(lot.facts, rules=lot.facts.rules + top)),)
-    data = (await client.get("/api/v1/parking/1", params={"vehicle": "RED"})).json()["zones"][0]
+    data = (await client.get("/api/v1/parking/1", params={"vehicle": "LARGE_HEAVY"})).json()["zones"][0]
     assert data["compatibility"]["status"] == "UNKNOWN"
     assert data["compatibility"]["provenance"] is None
     assert [record["provenance"]["source_id"] for record in data["compatibility"]["rule_evidence"]] == [2, 3]
@@ -155,7 +155,9 @@ async def test_selected_time_pins_rules_but_not_realtime_freshness(api, suffix):
     lot = make_lot(effective_from=NOW - timedelta(days=1))
     realtime = RealtimeFact(1, 100, "AVAILABLE", 3, 20, source())
     repository.lots = (replace(lot, zones=(replace(lot.zones[0], realtime=realtime),)),)
-    data = (await client.get(f"/api/v1/parking/1{suffix}", params={"vehicle": "RED", "at": past.isoformat()})).json()
+    data = (
+        await client.get(f"/api/v1/parking/1{suffix}", params={"vehicle": "LARGE_HEAVY", "at": past.isoformat()})
+    ).json()
     assert data["evaluation_at"] == "2026-10-02T04:00:00Z"
     assert data["zones"][0]["compatibility"]["reason"] == "space_type_default"
     assert data["zones"][0]["availability"]["freshness"]["status"] == "FRESH"
@@ -184,7 +186,7 @@ async def test_cursor_walk_equal_ties_pins_time_and_crosses_unknown_group(api):
     [
         {"lat": 25.04},
         {"radius": 1000},
-        {"vehicle": "YELLOW"},
+        {"vehicle": "NORMAL_HEAVY"},
         {"include_unknown": True},
         {"limit": 2},
         {"at": (NOW + timedelta(seconds=1)).isoformat()},
@@ -294,7 +296,7 @@ async def test_vehicle_required_all_selected_endpoints(api, path):
 
 @pytest.mark.parametrize("suffix", ["", "/rates", "/realtime"])
 async def test_unknown_parking_not_found(api, suffix):
-    response = await api[0].get(f"/api/v1/parking/999{suffix}", params={"vehicle": "RED"})
+    response = await api[0].get(f"/api/v1/parking/999{suffix}", params={"vehicle": "LARGE_HEAVY"})
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "PARKING_NOT_FOUND"
 
@@ -325,7 +327,7 @@ async def test_unresolved_rate_rule_blocks_daily_cap_filter_and_marks_raw_eviden
     rate = RateFact(
         7,
         100,
-        "RED",
+        "LARGE_HEAVY",
         "HOURLY",
         "PARSED",
         source(),
@@ -335,8 +337,24 @@ async def test_unresolved_rate_rule_blocks_daily_cap_filter_and_marks_raw_eviden
         rules=(RateRuleFact(1, day_type="HOLIDAY"),),
     )
     repository.lots = (replace(lot, zones=(replace(lot.zones[0], rates=(rate,)),)),)
-    data = (await client.get("/api/v1/parking/1/rates", params={"vehicle": "RED"})).json()
+    data = (await client.get("/api/v1/parking/1/rates", params={"vehicle": "LARGE_HEAVY"})).json()
     zone = data["zones"][0]
     assert zone["rate_summary"]["daily_max_twd"] is None
     assert zone["rates"][0]["applicability"] == "UNKNOWN"
     assert (await client.get("/api/v1/parking/nearby", params=query(daily_max_required=True))).json()["items"] == []
+
+
+@pytest.mark.parametrize("vehicle", ["GREEN", "WHITE", "YELLOW", "RED", "CAR"])
+@pytest.mark.parametrize("path", ["nearby", "1", "1/rates", "1/realtime"])
+async def test_legacy_vehicle_labels_are_rejected_everywhere(api, vehicle, path):
+    response = await api[0].get(f"/api/v1/parking/{path}", params=query(vehicle=vehicle))
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_openapi_only_exposes_new_rider_vehicle_classes():
+    spec = create_app().openapi()
+    for suffix in ("/nearby", "/{parking_id}", "/{parking_id}/rates", "/{parking_id}/realtime"):
+        params = spec["paths"][f"/api/v1/parking{suffix}"]["get"]["parameters"]
+        vehicle = next(p for p in params if p["name"] == "vehicle")
+        assert vehicle["schema"]["enum"] == ["NORMAL_HEAVY", "LARGE_HEAVY"]

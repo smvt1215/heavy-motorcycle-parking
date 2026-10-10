@@ -1,6 +1,6 @@
 # Accessibility audit: core MVP flow (M9)
 
-Flow audited: open map → choose YELLOW/RED → filter → search destination
+Flow audited: open map → choose NORMAL_HEAVY/LARGE_HEAVY → filter → search destination
 (`台北101`) → open parking detail → favorite / report → external navigation.
 "Automated" items run in `mobile/test/accessibility_test.dart` and
 `mobile/test/appearance_test.dart` on every CI run. Audit tests run once per

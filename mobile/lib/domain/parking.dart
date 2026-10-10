@@ -88,10 +88,11 @@ E _fromWire<E extends Enum>(
 }
 
 enum VehicleType {
-  yellow('YELLOW', '黃牌'),
-  red('RED', '紅牌');
+  normalHeavy('NORMAL_HEAVY', '普重', '普通重型機車'),
+  largeHeavy('LARGE_HEAVY', '大重', '大型重型機車（黃牌／紅牌）');
 
-  const VehicleType(this.wireValue, this.label);
+  const VehicleType(this.wireValue, this.label, this.formalName);
+  final String formalName;
   final String wireValue;
   final String label;
 
@@ -109,9 +110,12 @@ enum SpaceType {
   final String wireValue;
   final String label;
 
-  /// Space types offered as YELLOW/RED search filters. LIGHT_MOTO_ONLY is
+  /// Space types offered as LARGE_HEAVY search filters. LIGHT_MOTO_ONLY is
   /// known NOT_ALLOWED for heavy motorcycles and is never a search mode.
   static const List<SpaceType> searchable = [heavyOnly, motoShared, carShared];
+
+  static List<SpaceType> forVehicle(VehicleType vehicle) =>
+      vehicle == VehicleType.normalHeavy ? values : searchable;
 
   bool get isSearchable => this != lightMotoOnly;
 
@@ -628,7 +632,7 @@ class ParkingLot {
         rankingScoreBp: rankingScoreBp,
       );
 
-  /// Defensive presentation filter for normal YELLOW/RED search results.
+  /// Defensive presentation filter for selected-vehicle search results.
   ///
   /// Drops zones that are known NOT_ALLOWED, LIGHT_MOTO_ONLY, evaluated for a
   /// different vehicle, or UNKNOWN when unknown results were not requested.
@@ -644,7 +648,9 @@ class ParkingLot {
     final kept = zones.where((zone) {
       final c = zone.compatibility;
       if (c.vehicle != query.vehicle) return false;
-      if (!zone.spaceType.isSearchable) return false;
+      if (!SpaceType.forVehicle(query.vehicle).contains(zone.spaceType)) {
+        return false;
+      }
       return switch (c.status) {
         CompatibilityStatus.allowed => true,
         CompatibilityStatus.notAllowed => false,
@@ -872,7 +878,7 @@ const Object _unset = Object();
 class ParkingQuery {
   const ParkingQuery({
     required this.center,
-    this.vehicle = VehicleType.red,
+    this.vehicle = VehicleType.largeHeavy,
     this.radius = 1000,
     this.spaceType,
     this.availableOnly = false,
@@ -889,7 +895,7 @@ class ParkingQuery {
   final VehicleType vehicle;
   final int radius;
 
-  /// Never [SpaceType.lightMotoOnly]; rejected by [toQueryParameters].
+  /// [SpaceType.lightMotoOnly] is available only for NORMAL_HEAVY.
   final SpaceType? spaceType;
   final bool availableOnly;
   final num? hourlyRateMaxTwd;
@@ -936,11 +942,12 @@ class ParkingQuery {
     if (!center.isValid) {
       throw ArgumentError.value(center, 'center', 'invalid coordinate');
     }
-    if (spaceType == SpaceType.lightMotoOnly) {
+    if (vehicle == VehicleType.largeHeavy &&
+        spaceType == SpaceType.lightMotoOnly) {
       throw ArgumentError.value(
         spaceType,
         'spaceType',
-        'LIGHT_MOTO_ONLY is not a YELLOW/RED search filter',
+        'LIGHT_MOTO_ONLY is not a LARGE_HEAVY search filter',
       );
     }
     if (radius <= 0 || radius > maxRadius) {

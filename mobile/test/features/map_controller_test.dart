@@ -58,7 +58,7 @@ class _FakeRepository implements ParkingRepository {
 }
 
 NearbyParkingPage _page({
-  String vehicle = 'RED',
+  String vehicle = 'LARGE_HEAVY',
   String? nextCursor,
   bool hasMore = false,
   String evaluationAt = fixtureEvaluationAt,
@@ -95,7 +95,7 @@ void main() {
 
   test('initial state uses the Taipei default center and RED', () {
     expect(state().query.center, const GeoPoint(25.033, 121.5654));
-    expect(state().query.vehicle, VehicleType.red);
+    expect(state().query.vehicle, VehicleType.largeHeavy);
     expect(state().hasSearched, isFalse);
     expect(repo.nearbyCalls, isEmpty);
   });
@@ -120,9 +120,9 @@ void main() {
 
   test('destination search queries our backend at the destination', () async {
     final filtered = controller.setFilters(
-      state().query.copyWith(vehicle: VehicleType.yellow, radius: 800),
+      state().query.copyWith(vehicle: VehicleType.normalHeavy, radius: 800),
     );
-    repo.nearbyCalls.single.completer.complete(_page(vehicle: 'YELLOW'));
+    repo.nearbyCalls.single.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
     await filtered;
     controller.cameraMoved(const GeoPoint(25.1, 121.6));
     controller.cameraIdle();
@@ -135,9 +135,9 @@ void main() {
     expect(call.cursor, isNull);
     expect(call.query.center, taipei101.location);
     // Destination search keeps the explicit vehicle and filters.
-    expect(call.query.vehicle, VehicleType.yellow);
+    expect(call.query.vehicle, VehicleType.normalHeavy);
     expect(call.query.radius, 800);
-    call.completer.complete(_page(vehicle: 'YELLOW'));
+    call.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
     await future;
     expect(state().items, isNotEmpty);
 
@@ -250,50 +250,50 @@ void main() {
   });
 
   test('vehicle and filters persist across reads and later searches', () async {
-    final v = controller.setVehicle(VehicleType.yellow);
-    repo.nearbyCalls.last.completer.complete(_page(vehicle: 'YELLOW'));
+    final v = controller.setVehicle(VehicleType.normalHeavy);
+    repo.nearbyCalls.last.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
     await v;
     final f = controller.setFilters(
       state().query.copyWith(includeUnknown: true, radius: 3000),
     );
-    repo.nearbyCalls.last.completer.complete(_page(vehicle: 'YELLOW'));
+    repo.nearbyCalls.last.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
     await f;
 
     // Re-reading the persistent provider (e.g. after a widget rebuild).
     final again = container.read(mapControllerProvider);
-    expect(again.query.vehicle, VehicleType.yellow);
+    expect(again.query.vehicle, VehicleType.normalHeavy);
     expect(again.query.includeUnknown, isTrue);
     expect(again.query.radius, 3000);
     expect(again.items.map((l) => l.id), [12345, 12346]);
 
     final s = controller.search();
     final call = repo.nearbyCalls.last;
-    expect(call.query.vehicle, VehicleType.yellow);
+    expect(call.query.vehicle, VehicleType.normalHeavy);
     expect(call.query.includeUnknown, isTrue);
-    call.completer.complete(_page(vehicle: 'YELLOW'));
+    call.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
     await s;
   });
 
   test('setting the same vehicle is a no-op', () async {
-    await controller.setVehicle(VehicleType.red);
+    await controller.setVehicle(VehicleType.largeHeavy);
     expect(repo.nearbyCalls, isEmpty);
   });
 
   test('out-of-order responses: stale vehicle response is discarded', () async {
     final red = controller.search();
-    final yellow = controller.setVehicle(VehicleType.yellow);
+    final yellow = controller.setVehicle(VehicleType.normalHeavy);
     expect(repo.nearbyCalls, hasLength(2));
 
-    repo.nearbyCalls[1].completer.complete(_page(vehicle: 'YELLOW'));
+    repo.nearbyCalls[1].completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
     await yellow;
     repo.nearbyCalls[0].completer.complete(
       _page(items: [lotJson(id: 999)]),
     );
     await red;
 
-    expect(state().query.vehicle, VehicleType.yellow);
+    expect(state().query.vehicle, VehicleType.normalHeavy);
     expect(state().items.map((l) => l.id), [12345]);
-    expect(state().items.single.compatibilityVehicle, VehicleType.yellow);
+    expect(state().items.single.compatibilityVehicle, VehicleType.normalHeavy);
   });
 
   test('stale error after a newer search is discarded', () async {
@@ -319,13 +319,13 @@ void main() {
 
   test('unexpected stale failure does not replace a newer search', () async {
     final oldSearch = controller.search();
-    final search = controller.setVehicle(VehicleType.yellow);
-    repo.nearbyCalls.last.completer.complete(_page(vehicle: 'YELLOW'));
+    final search = controller.setVehicle(VehicleType.normalHeavy);
+    repo.nearbyCalls.last.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
     await search;
     repo.nearbyCalls.first.completer.completeError(StateError('old failure'));
     await oldSearch;
     expect(state().error, isNull);
-    expect(state().items.single.compatibilityVehicle, VehicleType.yellow);
+    expect(state().items.single.compatibilityVehicle, VehicleType.normalHeavy);
   });
 
   group('pagination', () {
@@ -447,13 +447,13 @@ void main() {
     test('loadMore response is dropped after a new search', () async {
       await firstPage();
       final more = controller.loadMore();
-      final search = controller.setVehicle(VehicleType.yellow);
-      repo.nearbyCalls.last.completer.complete(_page(vehicle: 'YELLOW'));
+      final search = controller.setVehicle(VehicleType.normalHeavy);
+      repo.nearbyCalls.last.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
       await search;
       repo.nearbyCalls[1].completer.complete(_page(items: [lotJson(id: 5)]));
       await more;
       expect(state().items.map((l) => l.id), [12345]);
-      expect(state().query.vehicle, VehicleType.yellow);
+      expect(state().query.vehicle, VehicleType.normalHeavy);
     });
 
     test('no concurrent loadMore calls', () async {
@@ -480,7 +480,7 @@ void main() {
       expect(state().detailLoading, isTrue);
       final call = repo.detailCalls.single;
       expect(call.id, 12345);
-      expect(call.vehicle, VehicleType.red);
+      expect(call.vehicle, VehicleType.largeHeavy);
       expect(call.at, DateTime.utc(2026, 10, 2, 9, 30));
       call.completer.complete(ParkingDetail.fromJson(detailFixture()));
       await f;
@@ -511,7 +511,7 @@ void main() {
         final json = detailFixture();
         json[mismatch] = switch (mismatch) {
           'id' => 999,
-          'vehicle' => 'YELLOW',
+          'vehicle' => 'NORMAL_HEAVY',
           _ => '2026-10-02T10:30:00Z',
         };
         repo.detailCalls.single.completer
@@ -549,13 +549,13 @@ void main() {
         () async {
       final lot = await loaded();
       final f = controller.selectLot(lot);
-      final v = controller.setVehicle(VehicleType.yellow);
+      final v = controller.setVehicle(VehicleType.normalHeavy);
       expect(state().selectedLot, isNull);
       repo.detailCalls.single.completer
           .complete(ParkingDetail.fromJson(detailFixture()));
       await f;
       expect(state().detail, isNull);
-      repo.nearbyCalls.last.completer.complete(_page(vehicle: 'YELLOW'));
+      repo.nearbyCalls.last.completer.complete(_page(vehicle: 'NORMAL_HEAVY'));
       await v;
     });
 

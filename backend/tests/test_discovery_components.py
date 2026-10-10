@@ -77,7 +77,7 @@ def rate(rate_id=901, **fields):
     values = {
         "rate_id": rate_id,
         "zone_id": 20,
-        "vehicle": "RED",
+        "vehicle": "LARGE_HEAVY",
         "rate_type": "HOURLY",
         "parse_status": "PARSED",
         "provenance": rate_prov(),
@@ -91,7 +91,7 @@ def rate(rate_id=901, **fields):
     return RateFact(**values)
 
 
-def resolve(*rates, vehicle="RED", at=MON_10, calendar=None):
+def resolve(*rates, vehicle="LARGE_HEAVY", at=MON_10, calendar=None):
     return resolve_rates(tuple(rates), vehicle, at, calendar)
 
 
@@ -293,8 +293,8 @@ def test_unspecified_vehicle_never_claims_selected_vehicle_price():
 
 
 def test_other_vehicle_rates_are_excluded():
-    assert resolve(rate(vehicle="YELLOW")) == (None, [])
-    assert resolve(rate(vehicle="YELLOW"), vehicle="YELLOW")[0]["comparison_eligible"] is True
+    assert resolve(rate(vehicle="NORMAL_HEAVY")) == (None, [])
+    assert resolve(rate(vehicle="NORMAL_HEAVY"), vehicle="NORMAL_HEAVY")[0]["comparison_eligible"] is True
 
 
 def test_null_vehicle_rate_does_not_contradict_or_join_exact_vehicle_rate():
@@ -304,7 +304,7 @@ def test_null_vehicle_rate_does_not_contradict_or_join_exact_vehicle_rate():
 
 
 def test_vehicle_enum_is_accepted():
-    summary, _ = resolve(rate(vehicle=VehicleType.RED), vehicle=VehicleType.RED)
+    summary, _ = resolve(rate(vehicle=VehicleType.LARGE_HEAVY), vehicle=VehicleType.LARGE_HEAVY)
     assert summary["comparison_eligible"] is True
 
 
@@ -682,7 +682,7 @@ def test_duplicate_display_texts_are_not_repeated():
 )
 def test_invalid_rate_inputs_are_rejected(rates):
     with pytest.raises(ValueError):
-        resolve_rates(rates, "RED", MON_10)
+        resolve_rates(rates, "LARGE_HEAVY", MON_10)
 
 
 def test_calendar_must_provide_is_holiday():

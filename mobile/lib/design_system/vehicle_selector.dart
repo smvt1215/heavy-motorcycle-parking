@@ -59,30 +59,34 @@ class _Label extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final plate = plateColors(vehicle);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // A tiny plate: color reinforces the label, never replaces it.
-          Container(
-            width: 14,
-            height: 10,
-            decoration: BoxDecoration(
-              color: plate.background,
-              borderRadius: BorderRadius.circular(2),
-              border:
-                  Border.all(color: plate.foreground.withValues(alpha: 0.5)),
+    return Tooltip(
+      message: vehicle.formalName,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // A tiny plate: color reinforces the label, never replaces it.
+            Container(
+              width: 14,
+              height: 10,
+              decoration: BoxDecoration(
+                color: plate.background,
+                borderRadius: BorderRadius.circular(2),
+                border:
+                    Border.all(color: plate.foreground.withValues(alpha: 0.5)),
+              ),
             ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            vehicle.label,
-            style: TextStyle(
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            const SizedBox(width: 6),
+            Text(
+              vehicle.label,
+              semanticsLabel: '${vehicle.label}，${vehicle.formalName}',
+              style: TextStyle(
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

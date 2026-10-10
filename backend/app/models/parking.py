@@ -129,6 +129,9 @@ class ParkingRule(TimestampMixin, Base):
     parking_id: Mapped[int] = mapped_column(Integer)
     zone_id: Mapped[int | None] = mapped_column(Integer)
     # Tri-state permissions: NULL = unknown. No defaults on purpose.
+    normal_heavy_allowed: Mapped[bool | None] = mapped_column(Boolean)
+    large_heavy_allowed: Mapped[bool | None] = mapped_column(Boolean)
+    # Historical plate-level evidence; never used to resolve class permission.
     green_plate_allowed: Mapped[bool | None] = mapped_column(Boolean)
     white_plate_allowed: Mapped[bool | None] = mapped_column(Boolean)
     yellow_plate_allowed: Mapped[bool | None] = mapped_column(Boolean)

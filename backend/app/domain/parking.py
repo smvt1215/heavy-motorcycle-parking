@@ -5,10 +5,10 @@ from datetime import UTC, datetime
 from math import isfinite
 from typing import Any, Literal
 
-Vehicle = Literal["GREEN", "WHITE", "YELLOW", "RED", "CAR"]
+Vehicle = Literal["NORMAL_HEAVY", "LARGE_HEAVY"]
 SpaceType = Literal["HEAVY_ONLY", "MOTO_SHARED", "CAR_SHARED", "LIGHT_MOTO_ONLY"]
 RuleKind = Literal["BASELINE", "EXCEPTION"]
-VEHICLES: tuple[Vehicle, ...] = ("GREEN", "WHITE", "YELLOW", "RED", "CAR")
+VEHICLES: tuple[Vehicle, ...] = ("NORMAL_HEAVY", "LARGE_HEAVY")
 SPACE_TYPES: tuple[SpaceType, ...] = ("HEAVY_ONLY", "MOTO_SHARED", "CAR_SHARED", "LIGHT_MOTO_ONLY")
 
 
@@ -48,11 +48,8 @@ class RuleFact:
     rule_kind: RuleKind
     authority_priority: int
     provenance: Provenance
-    green_plate_allowed: bool | None = None
-    white_plate_allowed: bool | None = None
-    yellow_plate_allowed: bool | None = None
-    red_plate_allowed: bool | None = None
-    car_allowed: bool | None = None
+    normal_heavy_allowed: bool | None = None
+    large_heavy_allowed: bool | None = None
     active: bool = True
     effective_from: datetime | None = None
     effective_to: datetime | None = None
@@ -72,13 +69,7 @@ class RuleFact:
             raise ValueError("Authority priority must be an explicitly configured integer")
         if type(self.active) is not bool:
             raise ValueError("Rule activity must be a boolean")
-        for field in (
-            "green_plate_allowed",
-            "white_plate_allowed",
-            "yellow_plate_allowed",
-            "red_plate_allowed",
-            "car_allowed",
-        ):
+        for field in ("normal_heavy_allowed", "large_heavy_allowed"):
             value = getattr(self, field)
             if value is not None and type(value) is not bool:
                 raise ValueError("Vehicle permissions must be TRUE, FALSE or NULL")

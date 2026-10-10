@@ -54,7 +54,7 @@ The backend derives identity only from the validated token. Clients MUST NOT cho
 Protected operations MUST declare the bearer security scheme in OpenAPI.
 
 ## Vehicle and evaluation context
-Selected-vehicle endpoints require explicit `vehicle`; v1 public/mobile parking flows support `YELLOW` and `RED`.
+Selected-vehicle endpoints require explicit `vehicle`; v1 public/mobile parking flows support `NORMAL_HEAVY` and `LARGE_HEAVY`.
 
 Required on:
 - `GET /parking/nearby`
@@ -143,9 +143,9 @@ Defaults:
 Supported MVP radius presets: 500m / 1km / 3km / 5km.
 
 ### Space type
-For YELLOW/RED search, `space_type` may narrow compatible results to `HEAVY_ONLY`, `MOTO_SHARED`, or `CAR_SHARED`.
+For LARGE_HEAVY search, `space_type` may narrow compatible results to `HEAVY_ONLY`, `MOTO_SHARED`, or `CAR_SHARED`.
 
-`LIGHT_MOTO_ONLY` is known `NOT_ALLOWED` for YELLOW/RED and is not a normal v1 search filter. `include_unknown=true` includes compatibility `UNKNOWN`, never known `NOT_ALLOWED` locations. Any future prohibited-location browsing is a separate discovery mode.
+`LIGHT_MOTO_ONLY` is known `NOT_ALLOWED` for LARGE_HEAVY and is not a normal v1 search filter. `include_unknown=true` includes compatibility `UNKNOWN`, never known `NOT_ALLOWED` locations. Any future prohibited-location browsing is a separate discovery mode.
 
 ## Compatibility
 Zone compatibility is `ALLOWED` / `NOT_ALLOWED` / `UNKNOWN`. `UNKNOWN` MUST NOT be coerced to true/false.
@@ -177,7 +177,7 @@ Every selected-vehicle parking endpoint uses this base zone member. Specialized 
   "capacity": 20,
   "compatibility": {
     "status": "ALLOWED",
-    "vehicle": "RED",
+    "vehicle": "LARGE_HEAVY",
     "reason": "explicit_vehicle_permission",
     "confidence": 1.0,
     "provenance": {
@@ -426,14 +426,14 @@ Changing any component formula, band, rounding rule, weight, or key order requir
       "name": "XX地下停車場",
       "distance_m": 420,
       "location": {"lat": 25.0331, "lng": 121.5628},
-      "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
+      "compatibility": {"status": "ALLOWED", "vehicle": "LARGE_HEAVY"},
       "zones": [
         {
           "zone_id": 20,
           "name": "B2 大重機區",
           "space_type": "HEAVY_ONLY",
           "capacity": 20,
-          "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
+          "compatibility": {"status": "ALLOWED", "vehicle": "LARGE_HEAVY"},
           "rate_summary": null,
           "availability": null
         }
@@ -462,12 +462,12 @@ Final page has `next_cursor=null`, `has_more=false`.
 Stable cursor errors: `INVALID_CURSOR`, `CURSOR_QUERY_MISMATCH`, `CURSOR_VERSION_UNSUPPORTED`. Cursor errors MUST NOT silently restart page one.
 
 ## Parking detail response
-`GET /parking/{id}?vehicle=RED&at=2026-10-02T09:30:00Z`
+`GET /parking/{id}?vehicle=LARGE_HEAVY&at=2026-10-02T09:30:00Z`
 
 ```json
 {
   "id": 12345,
-  "vehicle": "RED",
+  "vehicle": "LARGE_HEAVY",
   "evaluation_at": "2026-10-02T09:30:00Z",
   "name": "XX地下停車場",
   "location": {"lat": 25.0331, "lng": 121.5628},
@@ -477,7 +477,7 @@ Stable cursor errors: `INVALID_CURSOR`, `CURSOR_QUERY_MISMATCH`, `CURSOR_VERSION
       "name": "B2 大重機區",
       "space_type": "HEAVY_ONLY",
       "capacity": 20,
-      "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
+      "compatibility": {"status": "ALLOWED", "vehicle": "LARGE_HEAVY"},
       "rate_summary": null,
       "availability": null
     }
@@ -505,14 +505,14 @@ Stable cursor errors: `INVALID_CURSOR`, `CURSOR_QUERY_MISMATCH`, `CURSOR_VERSION
 Entrance access is ALLOWED / NOT_ALLOWED / UNKNOWN. Prefer ALLOWED entrance; UNKNOWN may be shown as unverified; NOT_ALLOWED is never selected; lot center is explicit fallback only when no usable confirmed entrance coordinate exists.
 
 ## Rates response
-`GET /parking/{id}/rates?vehicle=RED&at=...`
+`GET /parking/{id}/rates?vehicle=LARGE_HEAVY&at=...`
 
 The response uses the common zone base and adds `rates` as an endpoint-specific extension.
 
 ```json
 {
   "parking_id": 12345,
-  "vehicle": "RED",
+  "vehicle": "LARGE_HEAVY",
   "evaluation_at": "2026-10-02T09:30:00Z",
   "zones": [
     {
@@ -520,7 +520,7 @@ The response uses the common zone base and adds `rates` as an endpoint-specific 
       "name": "B2 大重機區",
       "space_type": "HEAVY_ONLY",
       "capacity": 20,
-      "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
+      "compatibility": {"status": "ALLOWED", "vehicle": "LARGE_HEAVY"},
       "rate_summary": {
         "display_text": "20元/小時・最高100元/日",
         "comparison_eligible": true,
@@ -564,14 +564,14 @@ The response uses the common zone base and adds `rates` as an endpoint-specific 
 Rates MUST NOT be attached across zones or hide selected-vehicle compatibility context.
 
 ## Realtime response
-`GET /parking/{id}/realtime?vehicle=RED&at=...`
+`GET /parking/{id}/realtime?vehicle=LARGE_HEAVY&at=...`
 
 The response uses the same common zone base. `evaluation_at` controls attached compatibility; realtime freshness remains current.
 
 ```json
 {
   "parking_id": 12345,
-  "vehicle": "RED",
+  "vehicle": "LARGE_HEAVY",
   "evaluation_at": "2026-10-02T09:30:00Z",
   "zones": [
     {
@@ -579,7 +579,7 @@ The response uses the same common zone base. `evaluation_at` controls attached c
       "name": "B2 大重機區",
       "space_type": "HEAVY_ONLY",
       "capacity": 20,
-      "compatibility": {"status": "ALLOWED", "vehicle": "RED"},
+      "compatibility": {"status": "ALLOWED", "vehicle": "LARGE_HEAVY"},
       "rate_summary": null,
       "availability": {
         "status": "AVAILABLE",
@@ -654,7 +654,7 @@ Use one JSON error shape with stable machine-readable code, human-readable messa
 Stable auth codes: `UNAUTHENTICATED` => 401; `FORBIDDEN` => 403.
 
 ## OpenAPI
-FastAPI-generated OpenAPI is required and must match tests. Protected operations declare the bearer scheme. Breaking v1 contract changes require `/api/v2` rather than silent mutation.
+FastAPI-generated OpenAPI is required and must match tests. Protected operations declare the bearer scheme. This development contract replaces legacy public vehicle labels in `/api/v1` without a compatibility API. GREEN/WHITE/YELLOW/RED/CAR return 422. Saved legacy preferences are retained only as evidence and are unset for the new app. Old cursors are rejected; sort_version remains 1.
 
 ## M3 implementation notes
 
@@ -664,3 +664,5 @@ rate normalization and component evidence projection. Compatibility adds
 `rule_evidence` to preserve all winning rules; the singular `provenance` is
 nullable when no single winner exists. Rates add `supporting_sources` and
 `applicability=MATCH|UNKNOWN` without omitting any common zone base member.
+
+NORMAL_HEAVY may filter LIGHT_MOTO_ONLY and includes confirmed conventional motorcycle zones. Known prohibited zones remain excluded for both classes.

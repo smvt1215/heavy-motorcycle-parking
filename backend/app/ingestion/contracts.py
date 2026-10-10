@@ -53,6 +53,8 @@ class NormalizedZone:
     name: str
     space_type: ParkingSpaceType
     capacity: int | None
+    normal_heavy: bool | None = None
+    large_heavy: bool | None = None
     green: bool | None = None
     white: bool | None = None
     yellow: bool | None = None

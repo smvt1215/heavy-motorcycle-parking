@@ -23,10 +23,10 @@ The service validates that the zone belongs to the requested lot.
 
 | Space type | Vehicles allowed by classification alone |
 | --- | --- |
-| HEAVY_ONLY | YELLOW, RED |
-| MOTO_SHARED | GREEN, WHITE, YELLOW, RED |
-| CAR_SHARED | YELLOW, RED, CAR |
-| LIGHT_MOTO_ONLY | GREEN, WHITE |
+| HEAVY_ONLY | LARGE_HEAVY |
+| MOTO_SHARED | NORMAL_HEAVY, LARGE_HEAVY |
+| CAR_SHARED | LARGE_HEAVY |
+| LIGHT_MOTO_ONLY | NORMAL_HEAVY |
 
 Explicit tri-state permissions override classification; an explicit NULL does
 not use the classification default. Database ID, source timestamp, input order
@@ -100,7 +100,7 @@ unrelated lot/rate/realtime/entrance provenance is presented as a rule source.
 
 `is_nearby_eligible` and `filter_nearby_zones` include ALLOWED, exclude NOT_ALLOWED,
 and include UNKNOWN only with the explicit boolean `include_unknown=True`.
-UNKNOWN remains UNKNOWN. Normal YELLOW/RED nearby search excludes LIGHT_MOTO_ONLY
+UNKNOWN remains UNKNOWN. Normal LARGE_HEAVY nearby search excludes LIGHT_MOTO_ONLY
 even if inconsistent source permissions would override that classification;
 no prohibited-location browsing control is introduced.
 

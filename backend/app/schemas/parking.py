@@ -3,12 +3,12 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.parking import absolute_instant
 
-PublicVehicle = Literal["YELLOW", "RED"]
-SearchSpace = Literal["HEAVY_ONLY", "MOTO_SHARED", "CAR_SHARED"]
+PublicVehicle = Literal["NORMAL_HEAVY", "LARGE_HEAVY"]
+SearchSpace = Literal["HEAVY_ONLY", "MOTO_SHARED", "CAR_SHARED", "LIGHT_MOTO_ONLY"]
 Status = Literal["ALLOWED", "NOT_ALLOWED", "UNKNOWN"]
 
 
@@ -50,6 +50,12 @@ class NearbyQuery(VehicleQuery):
     include_unknown: bool = False
     limit: int = Field(default=20, ge=1, le=100)
     cursor: str | None = Field(default=None, min_length=1, max_length=4096)
+
+    @model_validator(mode="after")
+    def vehicle_space_filter(self):
+        if self.vehicle == "LARGE_HEAVY" and self.space_type == "LIGHT_MOTO_ONLY":
+            raise ValueError("LIGHT_MOTO_ONLY is not a LARGE_HEAVY search filter")
+        return self
 
 
 class WireModel(BaseModel):

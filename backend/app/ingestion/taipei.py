@@ -29,8 +29,8 @@ Conservative mapping policy:
   PARTIALLY_PARSED and never assert a unit (CUnit is kept only as raw evidence).
   RateType 1 timed -> TIME_BLOCK, 2 -> PER_ENTRY, 3 -> MONTHLY, 4 -> FREE,
   5..8 multi-month -> CUSTOM, 9 charging excluded, unknown -> RAW_ONLY.
-  Vehicles: C -> CAR on car; CM -> CAR on car plus YELLOW/RED on an existing
-  heavy zone; M -> GREEN/WHITE on motor; HM -> YELLOW/RED on heavy; T (bus)
+  Vehicles: C -> CAR on car; CM -> CAR on car plus LARGE_HEAVY on an existing
+  heavy zone; M -> NORMAL_HEAVY on motor; HM -> LARGE_HEAVY on heavy; T (bus)
   unsupported. Exact duplicate FareRules are deduplicated; distinct
   (conflicting) ones survive with content-hash keys. Windows: "00"-"24" means
   unrestricted, a 24 end means midnight, anything else invalid -> INVALID.
@@ -93,14 +93,14 @@ _ZONE_TYPES = {
 }
 _POSITIVE_PERMISSIONS: dict[str, dict[str, bool]] = {
     CAR: {"car": True},
-    MOTOR: {"green": True, "white": True},
-    HEAVY: {"yellow": True, "red": True},
+    MOTOR: {"normal_heavy": True, "green": True, "white": True},
+    HEAVY: {"large_heavy": True, "yellow": True, "red": True},
 }
 _PARKING_TYPE_TARGETS: dict[str, tuple[tuple[str, VehicleType], ...]] = {
     "C": ((CAR, VehicleType.CAR),),
-    "CM": ((CAR, VehicleType.CAR), (HEAVY, VehicleType.YELLOW), (HEAVY, VehicleType.RED)),
-    "M": ((MOTOR, VehicleType.GREEN), (MOTOR, VehicleType.WHITE)),
-    "HM": ((HEAVY, VehicleType.YELLOW), (HEAVY, VehicleType.RED)),
+    "CM": ((CAR, VehicleType.CAR), (HEAVY, VehicleType.LARGE_HEAVY)),
+    "M": ((MOTOR, VehicleType.NORMAL_HEAVY),),
+    "HM": ((HEAVY, VehicleType.LARGE_HEAVY),),
 }
 # Channels that may create a capacity-NULL zone; CM never creates a heavy zone.
 _CHANNEL_ZONES = {"C": CAR, "CM": CAR, "M": MOTOR, "HM": HEAVY}

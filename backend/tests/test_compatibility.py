@@ -19,22 +19,16 @@ from app.services import (
 )
 from tests.fixtures.parking import EVALUATION_AT, RULE_CASES
 
-PERMISSION_FIELDS = {
-    "GREEN": "green_plate_allowed",
-    "WHITE": "white_plate_allowed",
-    "YELLOW": "yellow_plate_allowed",
-    "RED": "red_plate_allowed",
-    "CAR": "car_allowed",
-}
+PERMISSION_FIELDS = {"NORMAL_HEAVY": "normal_heavy_allowed", "LARGE_HEAVY": "large_heavy_allowed"}
 DEFAULT_ALLOWED = {
-    "HEAVY_ONLY": {"YELLOW", "RED"},
-    "MOTO_SHARED": {"GREEN", "WHITE", "YELLOW", "RED"},
-    "CAR_SHARED": {"YELLOW", "RED", "CAR"},
-    "LIGHT_MOTO_ONLY": {"GREEN", "WHITE"},
+    "HEAVY_ONLY": {"LARGE_HEAVY"},
+    "MOTO_SHARED": {"NORMAL_HEAVY", "LARGE_HEAVY"},
+    "CAR_SHARED": {"LARGE_HEAVY"},
+    "LIGHT_MOTO_ONLY": {"NORMAL_HEAVY"},
 }
 
 
-def rule(rule_id=1, permission=True, vehicle="RED", **fields):
+def rule(rule_id=1, permission=True, vehicle="LARGE_HEAVY", **fields):
     values = {
         "rule_id": rule_id,
         "parking_id": 10,
@@ -47,7 +41,7 @@ def rule(rule_id=1, permission=True, vehicle="RED", **fields):
     return RuleFact(**{**values, **fields})
 
 
-def evaluate(*rules, vehicle="RED", space_type="HEAVY_ONLY", at=EVALUATION_AT, calendar=None, zone_id=20):
+def evaluate(*rules, vehicle="LARGE_HEAVY", space_type="HEAVY_ONLY", at=EVALUATION_AT, calendar=None, zone_id=20):
     return ParkingCompatibilityService(calendar).evaluate(
         ParkingFacts(10, tuple(rules)), ZoneFacts(zone_id, 10, space_type), vehicle, at
     )
@@ -230,7 +224,7 @@ def test_json_result_keeps_all_winning_provenance_and_null_fields():
     )
     data = json.loads(json.dumps(result.to_dict(), allow_nan=False))
     assert data["status"] == "UNKNOWN"
-    assert data["vehicle"] == "RED"
+    assert data["vehicle"] == "LARGE_HEAVY"
     assert data["evaluation_at"] == "2026-10-05T04:00:00Z"
     assert data["rule_ids"] == [1, 2]
     assert len(data["provenance"]) == 2
@@ -253,12 +247,14 @@ def test_input_instant_and_zone_ownership_are_required():
     with pytest.raises(ValueError, match="offset-aware"):
         evaluate(at=datetime(2026, 10, 5))
     with pytest.raises(ValueError, match="belong"):
-        ParkingCompatibilityService().evaluate(ParkingFacts(10), ZoneFacts(20, 11, "HEAVY_ONLY"), "RED", EVALUATION_AT)
+        ParkingCompatibilityService().evaluate(
+            ParkingFacts(10), ZoneFacts(20, 11, "HEAVY_ONLY"), "LARGE_HEAVY", EVALUATION_AT
+        )
 
 
 def test_persisted_vehicle_enum_can_be_normalized_without_inferring_vehicle():
-    result = evaluate(vehicle=VehicleType.RED)
-    assert result.vehicle == "RED"
+    result = evaluate(vehicle=VehicleType.LARGE_HEAVY)
+    assert result.vehicle == "LARGE_HEAVY"
     assert type(result.vehicle) is str
     zone = ZoneFacts(20, 10, ParkingSpaceType.HEAVY_ONLY)
     assert type(zone.space_type) is str
@@ -278,7 +274,7 @@ def test_duplicate_rule_identity_is_rejected_instead_of_overwriting_conflicting_
         evaluate(rule(1), rule(1, permission=False))
 
 
-@pytest.mark.parametrize("vehicle", ["YELLOW", "RED"])
+@pytest.mark.parametrize("vehicle", ["LARGE_HEAVY"])
 @pytest.mark.parametrize("permission", [True, False, None])
 def test_light_moto_only_is_never_exposed_in_normal_heavy_search(vehicle, permission):
     result = evaluate(rule(vehicle=vehicle, permission=permission), vehicle=vehicle, space_type="LIGHT_MOTO_ONLY")
@@ -324,7 +320,7 @@ def test_rollup_rejects_prohibited_zones_or_mixed_evaluation_contexts():
     confirmed = evaluate()
     for other in (
         replace(confirmed, parking_id=11),
-        replace(confirmed, vehicle="YELLOW"),
+        replace(confirmed, vehicle="NORMAL_HEAVY"),
         replace(confirmed, evaluation_at=EVALUATION_AT + timedelta(seconds=1)),
     ):
         with pytest.raises(ValueError, match="one lot"):
@@ -334,8 +330,8 @@ def test_rollup_rejects_prohibited_zones_or_mixed_evaluation_contexts():
 @pytest.mark.parametrize(
     "fields",
     [
-        {"red_plate_allowed": 1},
-        {"red_plate_allowed": "true"},
+        {"large_heavy_allowed": 1},
+        {"large_heavy_allowed": "true"},
         {"active": None},
         {"authority_priority": True},
         {"authority_priority": None},

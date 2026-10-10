@@ -99,7 +99,9 @@ void main() {
     await settle();
     repo.tokens.clear(); // revoked server-side
     await expectLater(
-      c.read(authControllerProvider.notifier).setVehicle(VehicleType.red),
+      c
+          .read(authControllerProvider.notifier)
+          .setVehicle(VehicleType.largeHeavy),
       throwsA(isA<UserApiException>()),
     );
     expect(c.read(authControllerProvider).status, AuthStatus.guest);
@@ -113,11 +115,11 @@ void main() {
     await settle();
     await c
         .read(authControllerProvider.notifier)
-        .setVehicle(VehicleType.yellow);
-    expect(repo.preferred, VehicleType.yellow);
+        .setVehicle(VehicleType.normalHeavy);
+    expect(repo.preferred, VehicleType.normalHeavy);
     expect(
       c.read(authControllerProvider).profile!.preferredVehicle,
-      VehicleType.yellow,
+      VehicleType.normalHeavy,
     );
   });
 
@@ -134,15 +136,15 @@ void main() {
     c.read(authControllerProvider);
     await settle();
     final auth = c.read(authControllerProvider.notifier);
-    final first = auth.setVehicle(VehicleType.yellow);
-    final second = auth.setVehicle(VehicleType.red);
-    slow.complete(1, VehicleType.red);
+    final first = auth.setVehicle(VehicleType.normalHeavy);
+    final second = auth.setVehicle(VehicleType.largeHeavy);
+    slow.complete(1, VehicleType.largeHeavy);
     await second;
-    slow.complete(0, VehicleType.yellow);
+    slow.complete(0, VehicleType.normalHeavy);
     await first;
     expect(
       c.read(authControllerProvider).profile!.preferredVehicle,
-      VehicleType.red,
+      VehicleType.largeHeavy,
     );
   });
 
@@ -159,10 +161,10 @@ void main() {
     c.read(authControllerProvider);
     await settle();
     final auth = c.read(authControllerProvider.notifier);
-    final pending = auth.setVehicle(VehicleType.yellow);
+    final pending = auth.setVehicle(VehicleType.normalHeavy);
     await auth.signOut();
     await auth.devSignIn('bob');
-    slow.complete(0, VehicleType.yellow);
+    slow.complete(0, VehicleType.normalHeavy);
     await pending;
     expect(c.read(authControllerProvider).profile!.preferredVehicle, isNull);
   });

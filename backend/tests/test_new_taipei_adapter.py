@@ -78,8 +78,8 @@ def test_heavy_fee_creates_unknown_heavy_zone_with_vehicle_rates():
     by_text = {}
     for rate in heavy.rates:
         by_text.setdefault(rate.parsed.raw_text, set()).add(rate.vehicle)
-    assert by_text["重型機車計時20元"] == {VehicleType.YELLOW, VehicleType.RED}
-    assert by_text["重型機車月租1500元"] == {VehicleType.YELLOW, VehicleType.RED}
+    assert by_text["重型機車計時20元"] == {VehicleType.LARGE_HEAVY}
+    assert by_text["重型機車月租1500元"] == {VehicleType.LARGE_HEAVY}
     assert by_text[static_records()["110014"]["PAYEX"]] == {None}
     hourly = next(r for r in heavy.rates if r.parsed.raw_text == "重型機車計時20元")
     # 計時 states no time unit, so no hourly comparison value is guessed.
@@ -92,7 +92,7 @@ def test_heavy_fee_creates_unknown_heavy_zone_with_vehicle_rates():
 def test_motor_labels_never_leak_into_heavy_or_car_zones():
     normalized = lot("010152")
     by_zone = {key: {(r.vehicle, r.parsed.raw_text) for r in zone.rates} for key, zone in zones(normalized).items()}
-    assert (VehicleType.GREEN, "機車計次10元") in by_zone["motor"]
+    assert (VehicleType.NORMAL_HEAVY, "機車計次10元") in by_zone["motor"]
     assert not any(text.startswith("機車") for _, text in by_zone["heavy"] if _ is not None)
     assert not any(text.startswith("重型機車") for vehicle, text in by_zone["motor"] if vehicle is not None)
     assert all(vehicle in (VehicleType.CAR, None) for vehicle, _ in by_zone["car"])
@@ -104,7 +104,7 @@ def test_free_motor_fee_is_parsed_for_green_white_only():
     motor = zones(lot("010189"))["motor"]
     assert motor.capacity == 50
     free = [r for r in motor.rates if r.vehicle is not None]
-    assert {r.vehicle for r in free} == {VehicleType.GREEN, VehicleType.WHITE}
+    assert {r.vehicle for r in free} == {VehicleType.NORMAL_HEAVY, VehicleType.NORMAL_HEAVY}
     assert all(r.parsed.rate_type == RateType.FREE for r in free)
 
 

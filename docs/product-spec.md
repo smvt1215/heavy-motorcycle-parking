@@ -1,7 +1,7 @@
 # 重機停車通 Product Specification v1.2
 
 ## Goal
-讓黃牌／紅牌大型重型機車使用者快速確認：附近哪裡可合法停、停哪種格、現在有沒有位、多少錢、入口在哪裡。
+讓普通重型及大型重型機車使用者快速確認：附近哪裡可合法停、停哪種格、現在有沒有位、多少錢、入口在哪裡。
 
 ## MVP region
 台北市、新北市。
@@ -10,15 +10,15 @@
 定位或搜尋目的地 → 查詢附近停車 → 依車種合法性過濾 → 顯示距離/空位/費率/來源 → 查看停車區與入口 → Apple Maps / Google Maps 外部導航。
 
 ## Parking space types
-- `HEAVY_ONLY`: 黃/紅牌可停；綠/白牌、汽車不可停。
-- `MOTO_SHARED`: 黃/紅/綠/白牌可停；汽車不可停。
-- `CAR_SHARED`: 黃/紅牌與汽車可停；綠/白牌不可停。
-- `LIGHT_MOTO_ONLY`: 僅綠/白牌；對黃/紅牌屬已確認 `NOT_ALLOWED`，不屬於正常停車搜尋結果。
+- `HEAVY_ONLY`: 大重專用；普重不可停。
+- `MOTO_SHARED`: 普重／大重共用；以分類級許可為準。
+- `CAR_SHARED`: 汽車共享區；確認大重許可時納入，普重不可停。
+- `LIGHT_MOTO_ONLY`: 一般機車區；確認普重適用時納入，大重正常搜尋排除。
 
 Four-type classification is descriptive, not the only authority. Explicit per-vehicle tri-state permissions remain authoritative when present.
 
 ## Vehicle types
-`GREEN`, `WHITE`, `YELLOW`, `RED`, `CAR`.
+`NORMAL_HEAVY`（普重／普通重型機車）、`LARGE_HEAVY`（大重／大型重型機車，包含黃牌及紅牌）。未設定偏好預設大重；每次查詢明確傳入 vehicle。舊公開值全部回傳 422。
 
 ## Compatibility states
 Vehicle compatibility is tri-state and must remain explicit end-to-end:
@@ -26,10 +26,10 @@ Vehicle compatibility is tri-state and must remain explicit end-to-end:
 - `NOT_ALLOWED`: confirmed not allowed.
 - `UNKNOWN`: permission cannot currently be verified.
 
-MVP behavior for yellow/red users:
+MVP behavior for both rider classes:
 - Normal map/search results include `ALLOWED` parking only.
 - `NOT_ALLOWED` parking is excluded from normal results.
-- `LIGHT_MOTO_ONLY` is therefore not offered as a normal YELLOW/RED parking-search filter.
+- `LIGHT_MOTO_ONLY` is available to NORMAL_HEAVY only when applicable permission is confirmed; it is excluded from LARGE_HEAVY search.
 - `UNKNOWN` parking is excluded by default, but may be displayed when the user enables an explicit `顯示未確認停車位置` option.
 - When shown, `UNKNOWN` locations must be labeled `尚未確認` and must never use the same visual or wording as confirmed legal parking.
 - `UNKNOWN` must never be silently converted to `NOT_ALLOWED` or `ALLOWED`.
@@ -76,4 +76,4 @@ No AI/LLM ranking is used in MVP.
 No in-app turn-by-turn navigation, payment, monthly-rental marketplace, social feed/chat, AI ranking, CarPlay, Android Auto, or prohibited-location discovery mode.
 
 ## Definition of Done
-User selects RED, searches `台北101`, sees confirmed applicable heavy-motorcycle parking options, compares distance/availability/rates, opens details with source and entrance, then launches Apple Maps or Google Maps to the entrance. If the user explicitly enables unverified locations, any returned `UNKNOWN` result is clearly labeled and cannot be mistaken for confirmed legal parking.
+User selects LARGE_HEAVY, searches `台北101`, sees confirmed applicable heavy-motorcycle parking options, compares distance/availability/rates, opens details with source and entrance, then launches Apple Maps or Google Maps to the entrance. If the user explicitly enables unverified locations, any returned `UNKNOWN` result is clearly labeled and cannot be mistaken for confirmed legal parking.

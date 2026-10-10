@@ -33,9 +33,9 @@ our `/api/v1/parking` API; the map SDK supplies the basemap and user interaction
 Built-in `ClusterManager` groups markers; a cluster tap fits its bounds. Marker
 silhouettes plus motorcycle/car icons distinguish the domain space types.
 Unverified markers use a triangle and question mark; their result and zone rows
-say `尚未確認`. Normal filters offer HEAVY_ONLY, MOTO_SHARED, CAR_SHARED only.
+say `尚未確認`. Large-vehicle filters offer HEAVY_ONLY, MOTO_SHARED, CAR_SHARED. NORMAL_HEAVY also offers LIGHT_MOTO_ONLY.
 
-Vehicle defaults to explicit RED, with YELLOW/RED selection in app state. Quick
+Vehicle defaults to explicit LARGE_HEAVY, with NORMAL_HEAVY/LARGE_HEAVY selection in app state. Quick
 filters send `available_only` and confirmed hourly thresholds to the backend;
 advanced filters add radius, space type, daily cap and `include_unknown`.
 Preferences survive route/widget rebuilds for the app session. Persistence across
@@ -121,7 +121,7 @@ Manual device verification with restricted keys remains necessary for basemap
 rendering, native marker clustering, the operating system permission dialog,
 Google/Apple Maps app dispatch, VoiceOver/TalkBack and platform appearance. Check
 on both platforms: deny location and keep searching; drag without API requests;
-press `搜尋此區域`; change YELLOW/RED and filters; open mixed-zone detail; check
+press `搜尋此區域`; change NORMAL_HEAVY/LARGE_HEAVY and filters; open mixed-zone detail; check
 stale/partial/unknown wording; confirm navigation prefers the allowed entrance;
 switch system light/dark appearance. M6 adds [destination search](destination-search.md);
 destination camera moves within ~1 m of the searched center do not prompt

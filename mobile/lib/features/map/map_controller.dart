@@ -223,7 +223,7 @@ class MapController extends StateNotifier<MapState> {
 
   Future<void> setVehicle(VehicleType vehicle) async {
     if (vehicle == state.query.vehicle) return;
-    await _runSearch(state.query.copyWith(vehicle: vehicle));
+    await _runSearch(state.query.copyWith(vehicle: vehicle, spaceType: null));
   }
 
   /// Applies filters from [filters]; the searched center is kept and an

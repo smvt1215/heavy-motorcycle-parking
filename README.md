@@ -121,7 +121,7 @@ unknown-data handling, file replay and observable record failures.
 
 All rights reserved.
 
-雙北政策來源、核對範圍與路邊 worker：[雙北政策與資料](docs/twin-city-policy.md)。
+雙北政策來源、核對範圍與路邊 worker：[雙北政策與資料](docs/twin-city-policy.md)；2026-10-10 資料核對與缺口：[缺口報告](docs/twin-city-data-gaps.md)。
 
 整合結果、實機與金鑰待驗項目：[整合驗收紀錄](docs/integration-acceptance.md)。
 

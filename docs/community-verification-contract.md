@@ -48,7 +48,7 @@
 
 DB 約束：
 - `UNPUBLISHED` 時 `publication_basis`、`first_published_at`、`published_until` 都必須是 NULL；其他狀態必須有 basis 與首次發布時間。
-- `COMMUNITY_CORROBORATED` 與 `MANUAL_REVIEW` 的期限固定為首次發布起 90 天（`ck_community_cases_observation_term_90_days`）。`first_published_at` 只寫一次，暫停後恢復不重設期限。
+- `COMMUNITY_CORROBORATED` 與 `MANUAL_REVIEW` 的期限固定為首次發布起 90 天；`VERIFIED_SOURCE` 的 `published_until` 必須是 NULL，不會被推導成 `EXPIRED`（`ck_community_cases_observation_term_90_days`）。`first_published_at` 只寫一次，暫停後恢復不重設期限。
 - `PUBLISHED` 必須是 `ACCEPTED`。被異議暫停時，審查狀態可回到 `MANUAL_REVIEW`，發布狀態為 `SUSPENDED`。
 - `WITHDRAWN` 必須有 `withdrawn_at`，反之亦然。
 
@@ -116,7 +116,7 @@ DB 約束：
 | `FUTURE` | 晚於 `received_at`，不容許誤差 | 有值 |
 | `OUTSIDE_WINDOW` | 早於 `received_at − 30 天` | 有值 |
 
-小數秒存在時保留到微秒；沒有小數秒不影響是否有效。DB 約束 `ck_community_evidence_photos_time_status_consistent` 確保時間狀態與儲存欄位一致。
+小數秒存在時保留到微秒；沒有小數秒不影響是否有效。原始字串用 `exif_raw_for_storage` 正規化後才存入：只有空白或 NUL 的值存成 NULL，前後的空白與 NUL 會去掉，超過欄位長度的值不存（這種值一定判定為 `INVALID`）。DB 約束 `ck_community_evidence_photos_time_status_consistent` 確保時間狀態與儲存欄位一致。
 
 自動發布當下另外用 `counts_at_publication` 檢查：原回報與每張支持照片都必須是 `VALID`，而且在發布時刻往前 30 天內。這個檢查不改寫接收時的判定。發布後因撤票或異議重新計票時，照片自然變舊不會取消資格。
 
@@ -126,15 +126,16 @@ DB 約束：
 - 解碼失敗、超過大小或像素上限仍會被拒絕；缺 metadata 的照片仍可提交。
 - `normalized_sha256` 是儲存後 JPEG 的 SHA-256，只用來在同一案件內做確定性去重：重複的照片仍會保存，但不算獨立證據。它不宣稱能識別所有改圖或灌票。
 - 每張照片只屬於一個來源：原回報的 revision，或某個立場（`ck_community_evidence_photos_one_owner`），而且必須是同一案件（複合外鍵）。
+- 照片在接收時就固定：所屬來源、雜湊、接收時間、EXIF 值、解析版本與時間狀態都不能修改。唯一允許的 UPDATE 是一次性的刪除轉換（trigger `community_guard_photo_update`）。
 - 刪除照片時清除儲存物件 key 與私人原始時間欄位，設定 `deleted_at`，保留這筆紀錄供稽核與去重。若因此證據不足，暫停受影響的發布並轉複審。
 
 ## 6. 補證、異議與初審
 
-- 每位參與者在每個案件同時只能有一個有效立場（部分唯一索引 `uq_community_case_stances_active`）。改變立場時，先撤回舊立場（`withdrawn_at`），再新增一筆，歷史全部保留。被認定無效時記錄 `invalidated_at` 與 `invalidated_reason`。
+- 每位參與者在每個案件同時只能有一個有效立場（部分唯一索引 `uq_community_case_stances_active`）。改變立場時，先撤回舊立場（`withdrawn_at`），再新增一筆，歷史全部保留。被認定無效時記錄 `invalidated_at` 與 `invalidated_reason`。立場的內容不能修改，這三個欄位只能從 NULL 設定一次（trigger `community_guard_set_once`）。revision 同樣不能修改，只有 `description_approved_at` 可以設定一次。
 - `SUPPORT`、`OPPOSE` 必須附觀察值；`CANNOT_CONFIRM` 不需要。
 - **自動補證門檻**（`CORROBORATION_THRESHOLD = 3`）：低風險案件除了原作者之外，還要有 3 位參與者各自提出 `SUPPORT`、附自己的觀察值，以及至少一張發布時仍符合條件的照片。原回報本身也要有符合條件的照片。重複的 evidence ID 或 SHA-256 不算獨立證據。作者的支持不計入。
 - **有效異議**：提出者是未停權的登入者，不是重複支持的證據，指向同一事實與區域，附符合條件的照片和不同的觀察值。有效異議會暫停已發布的觀察並轉人工；未達條件的異議可以送人工，但不能自動暫停。
-- **初審**：每次執行寫入 `community_prechecks`（規則版本、整體結果、時間），每項檢查寫入 `community_precheck_results`：
+- **初審**：每次執行寫入 `community_prechecks`（規則版本、整體結果、時間；`(case_id, revision)` 必須指向既有的 revision），每項檢查寫入 `community_precheck_results`：
 
 | `check_code` | 內容 |
 | --- | --- |
@@ -164,6 +165,8 @@ DB 約束：
 | `FREEZE` | 0 | 爭議或刪照造成證據不足時凍結，指向對應的 AWARD |
 | `UNFREEZE` | 0 | 恢復 |
 | `REVOKE` | −1 | 判定無效，指向對應的 AWARD；每案每人最多 1 筆 |
+
+`FREEZE`、`UNFREEZE`、`REVOKE` 必須指向同一案件、同一參與者的 `AWARD`（複合外鍵加上 INSERT trigger 檢查）。
 
 `reason` 有三種：
 - `ORIGINAL_REPORT`：原回報被採納。

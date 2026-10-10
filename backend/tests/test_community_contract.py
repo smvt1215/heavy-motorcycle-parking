@@ -15,6 +15,7 @@ from app.domain.community import (
     counts_at_publication,
     derive_publication_status,
     effective_points,
+    exif_raw_for_storage,
     publication_term_end,
 )
 from app.models.enums import CasePublicationState as State
@@ -144,3 +145,19 @@ def test_frozen_awards_do_not_count_and_revocations_reverse():
 def test_original_photo_limit_defaults_to_15_mb(monkeypatch):
     monkeypatch.delenv("REPORT_PHOTO_MAX_BYTES", raising=False)
     assert Settings(_env_file=None).report_photo_max_bytes == 15_000_000
+
+
+@pytest.mark.parametrize(
+    "value, stored",
+    [
+        (None, None),
+        ("", None),
+        ("                   ", None),
+        ("\x00" * 19, None),
+        ("2026:10:10 11:30:00\x00", "2026:10:10 11:30:00"),
+        ("+08:00", "+08:00"),
+        ("+08:00:00:00", None),
+    ],
+)
+def test_raw_exif_values_are_normalized_before_storage(value, stored):
+    assert exif_raw_for_storage(value, 8 if value and value.startswith("+") else 32) == stored

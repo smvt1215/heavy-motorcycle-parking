@@ -194,8 +194,10 @@ class CommunityCase(TimestampMixin, Base):
             name="ck_community_cases_publication_recorded",
         ),
         CheckConstraint(
-            "publication_basis IS NULL OR publication_basis = 'VERIFIED_SOURCE' "
-            "OR published_until IS NOT DISTINCT FROM first_published_at + interval '90 days'",
+            "publication_basis IS NULL "
+            "OR (publication_basis = 'VERIFIED_SOURCE' AND published_until IS NULL) "
+            "OR (publication_basis <> 'VERIFIED_SOURCE' "
+            "AND published_until IS NOT DISTINCT FROM first_published_at + interval '90 days')",
             name="ck_community_cases_observation_term_90_days",
         ),
         CheckConstraint(
@@ -461,6 +463,12 @@ class CommunityPrecheck(Base):
             name="fk_community_prechecks_case_id_community_cases",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["case_id", "revision"],
+            ["community_case_revisions.case_id", "community_case_revisions.revision"],
+            name="fk_community_prechecks_case_id_revision",
+            ondelete="CASCADE",
+        ),
         CheckConstraint("revision >= 1", name="ck_community_prechecks_revision_positive"),
         Index("ix_community_prechecks_case_id", "case_id"),
     )
@@ -556,10 +564,12 @@ class ContributionLedgerEntry(CreatedAtMixin, Base):
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
-            ["reverses_entry_id"],
-            ["contribution_ledger.id"],
-            name="fk_contribution_ledger_reverses_entry_id_contribution_ledger",
+            ["reverses_entry_id", "case_id", "participant_id"],
+            ["contribution_ledger.id", "contribution_ledger.case_id", "contribution_ledger.participant_id"],
+            name="fk_contribution_ledger_reverses_same_case_participant",
         ),
+        # Target for the reversal FK; a trigger also requires the target to be an AWARD.
+        UniqueConstraint("id", "case_id", "participant_id", name="uq_contribution_ledger_id_case_id_participant_id"),
         CheckConstraint(
             "CASE entry_type WHEN 'AWARD' THEN points = 1 WHEN 'REVOKE' THEN points = -1 ELSE points = 0 END",
             name="ck_contribution_ledger_points_by_entry_type",

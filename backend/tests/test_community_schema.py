@@ -595,3 +595,141 @@ def test_downgrade_to_005_keeps_legacy_reports_and_removes_community_schema(engi
         command.upgrade(ALEMBIC, "head")
         with engine.begin() as connection:
             connection.execute(text("DELETE FROM parking_lots WHERE id = :lot"), {"lot": lot})
+
+
+def _append_only_violation(db, statement):
+    with pytest.raises(DBAPIError) as error, db.begin_nested():
+        db.execute(statement)
+    assert error.value.orig.sqlstate == "23001", error.value
+
+
+def test_revision_proposals_are_immutable_and_approval_is_set_once(db, t, g):
+    table = t["community_case_revisions"]
+    row = table.c.id == g["revision"]
+    for values in (
+        {"proposed_value": {"present": False}},
+        {"source_url": "https://example.com/changed"},
+        {"description": "rewritten"},
+    ):
+        _append_only_violation(db, update(table).where(row).values(**values))
+
+
+def test_revision_description_approval_once(db, t, g):
+    table = t["community_case_revisions"]
+    revision = ins(
+        db,
+        table,
+        case_id=g["low"],
+        revision=2,
+        proposed_value={"present": True},
+        description="燈光正常",
+        created_by_participant_id=g["people"][0],
+    )
+    row = table.c.id == revision
+    db.execute(update(table).where(row).values(description_approved_at=NOW))
+    _append_only_violation(db, update(table).where(row).values(description_approved_at=NOW + timedelta(days=1)))
+    _append_only_violation(db, update(table).where(row).values(description_approved_at=None))
+
+
+def test_stances_change_only_by_withdrawal_or_invalidation(db, t, g):
+    table = t["community_case_stances"]
+    stance = ins(
+        db, table, case_id=g["low"], participant_id=g["people"][1], stance="SUPPORT", observed_value={"present": True}
+    )
+    row = table.c.id == stance
+    _append_only_violation(db, update(table).where(row).values(stance="OPPOSE", observed_value={"present": False}))
+    _append_only_violation(db, update(table).where(row).values(participant_id=g["people"][2]))
+    db.execute(update(table).where(row).values(withdrawn_at=text("now()")))
+    _append_only_violation(db, update(table).where(row).values(withdrawn_at=None))
+    db.execute(update(table).where(row).values(invalidated_at=NOW + timedelta(days=1), invalidated_reason="DUPLICATE"))
+    _append_only_violation(db, update(table).where(row).values(invalidated_reason="OTHER"))
+
+
+def test_photo_receipt_classification_cannot_be_rewritten(db, t, g):
+    table = t["community_evidence_photos"]
+    missing = ins(
+        db,
+        table,
+        **photo(
+            g,
+            key="missing",
+            time_status="MISSING",
+            exif_datetime_original=None,
+            exif_offset_time_original=None,
+            captured_at=None,
+        ),
+    )
+    row = table.c.id == missing
+    # A self-consistent VALID row is still rejected: classification is fixed at receipt.
+    _append_only_violation(
+        db,
+        update(table)
+        .where(row)
+        .values(
+            time_status="VALID",
+            exif_datetime_original="2026:10:10 11:00:00",
+            exif_offset_time_original="+08:00",
+            captured_at=NOW - timedelta(hours=1),
+        ),
+    )
+    for values in ({"normalized_sha256": "b" * 64}, {"received_at": NOW - timedelta(days=1)}, {"stance_id": None}):
+        _append_only_violation(db, update(table).where(row).values(**values))
+    db.execute(update(table).where(row).values(deleted_at=NOW, storage_key=None))
+    _append_only_violation(db, update(table).where(row).values(deleted_at=NOW + timedelta(days=1)))
+    deleted = db.execute(select(table).where(row)).one()
+    assert (deleted.time_status, deleted.normalized_sha256, deleted.storage_key) == ("MISSING", SHA, None)
+
+
+def test_ledger_reversals_must_reference_the_same_award(db, t, g):
+    table = t["contribution_ledger"]
+    award = ins(
+        db, table, participant_id=g["people"][1], case_id=g["low"], entry_type="AWARD", reason="CORROBORATION", points=1
+    )
+    other_award = ins(
+        db, table, participant_id=g["people"][2], case_id=g["low"], entry_type="AWARD", reason="CORROBORATION", points=1
+    )
+    freeze = ins(
+        db,
+        table,
+        participant_id=g["people"][1],
+        case_id=g["low"],
+        entry_type="FREEZE",
+        reason="CORROBORATION",
+        points=0,
+        reverses_entry_id=award,
+    )
+    base = {"participant_id": g["people"][1], "case_id": g["low"], "reason": "CORROBORATION"}
+    rejected(db, table, FK, **base, entry_type="REVOKE", points=-1, reverses_entry_id=other_award)
+    rejected(db, table, FK, **{**base, "case_id": g["other"]}, entry_type="REVOKE", points=-1, reverses_entry_id=award)
+    with pytest.raises(DBAPIError) as error, db.begin_nested():
+        ins(db, table, **base, entry_type="UNFREEZE", points=0, reverses_entry_id=freeze)
+    assert error.value.orig.sqlstate == CHECK
+    ins(db, table, **base, entry_type="UNFREEZE", points=0, reverses_entry_id=award)
+
+
+def test_verified_source_publications_have_no_term(db, t, g):
+    base = {
+        "parking_id": g["lots"][0],
+        "zone_id": g["zones"][0],
+        "fact_type": "PARKING_PERMISSION",
+        "vehicle": "NORMAL_HEAVY",
+        "author_participant_id": g["people"][0],
+        "review_status": "ACCEPTED",
+        "publication_state": "PUBLISHED",
+        "publication_basis": "VERIFIED_SOURCE",
+        "first_published_at": NOW,
+    }
+    for until in (NOW + timedelta(days=90), NOW + timedelta(days=1)):
+        assert (
+            rejected(db, t["community_cases"], CHECK, **base, published_until=until)
+            == "ck_community_cases_observation_term_90_days"
+        )
+    ins(db, t["community_cases"], **base)
+
+
+def test_prechecks_reference_an_existing_revision(db, t, g):
+    table = t["community_prechecks"]
+    base = {"case_id": g["low"], "rule_version": "precheck-1", "outcome": "PASS", "evaluated_at": NOW}
+    ins(db, table, **base, revision=1)
+    rejected(db, table, FK, **base, revision=999)
+    rejected(db, table, FK, **{**base, "case_id": g["rule"]}, revision=1)

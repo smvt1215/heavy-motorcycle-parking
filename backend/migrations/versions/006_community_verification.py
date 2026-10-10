@@ -75,6 +75,28 @@ ENUMS = {
     "contribution_reason": ("ORIGINAL_REPORT", "CORROBORATION", "UPHELD_OBJECTION"),
 }
 IMMUTABLE_TABLES = ("community_case_events", "community_prechecks", "community_precheck_results", "contribution_ledger")
+# Proposal and stance content is immutable; only these columns may be set once from NULL.
+SET_ONCE_COLUMNS = {
+    "community_case_revisions": ("description_approved_at",),
+    "community_case_stances": ("withdrawn_at", "invalidated_at", "invalidated_reason"),
+}
+PHOTO_DELETION_SQL = ", ".join(
+    f"'{column}'"
+    for column in (
+        "deleted_at",
+        "storage_key",
+        "exif_datetime_original",
+        "exif_offset_time_original",
+        "exif_subsec_time_original",
+        "captured_at",
+    )
+)
+FUNCTIONS = (
+    "community_reject_update",
+    "community_guard_set_once",
+    "community_guard_photo_update",
+    "community_ledger_reverses_award",
+)
 TABLES = (
     "idempotency_records",
     "contribution_ledger",
@@ -268,8 +290,10 @@ def upgrade() -> None:
             name="ck_community_cases_publication_recorded",
         ),
         sa.CheckConstraint(
-            "publication_basis IS NULL OR publication_basis = 'VERIFIED_SOURCE' "
-            "OR published_until IS NOT DISTINCT FROM first_published_at + interval '90 days'",
+            "publication_basis IS NULL "
+            "OR (publication_basis = 'VERIFIED_SOURCE' AND published_until IS NULL) "
+            "OR (publication_basis <> 'VERIFIED_SOURCE' "
+            "AND published_until IS NOT DISTINCT FROM first_published_at + interval '90 days')",
             name="ck_community_cases_observation_term_90_days",
         ),
         sa.CheckConstraint(
@@ -464,6 +488,12 @@ def upgrade() -> None:
         _tz("evaluated_at", nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_community_prechecks"),
         _case_fk(table),
+        sa.ForeignKeyConstraint(
+            ["case_id", "revision"],
+            ["community_case_revisions.case_id", "community_case_revisions.revision"],
+            name="fk_community_prechecks_case_id_revision",
+            ondelete="CASCADE",
+        ),
         sa.CheckConstraint("revision >= 1", name="ck_community_prechecks_revision_positive"),
     )
     op.create_index("ix_community_prechecks_case_id", table, ["case_id"])
@@ -529,10 +559,11 @@ def upgrade() -> None:
         _participant_fk(table, "participant_id"),
         _case_fk(table),
         sa.ForeignKeyConstraint(
-            ["reverses_entry_id"],
-            ["contribution_ledger.id"],
-            name="fk_contribution_ledger_reverses_entry_id_contribution_ledger",
+            ["reverses_entry_id", "case_id", "participant_id"],
+            ["contribution_ledger.id", "contribution_ledger.case_id", "contribution_ledger.participant_id"],
+            name="fk_contribution_ledger_reverses_same_case_participant",
         ),
+        sa.UniqueConstraint("id", "case_id", "participant_id", name="uq_contribution_ledger_id_case_id_participant_id"),
         sa.CheckConstraint(
             "CASE entry_type WHEN 'AWARD' THEN points = 1 WHEN 'REVOKE' THEN points = -1 ELSE points = 0 END",
             name="ck_contribution_ledger_points_by_entry_type",
@@ -590,17 +621,85 @@ def upgrade() -> None:
         $$
         """
     )
+    # Every column is immutable except the trigger arguments, which may be set once from NULL.
+    op.execute(
+        """
+        CREATE FUNCTION community_guard_set_once() RETURNS trigger LANGUAGE plpgsql AS $$
+        DECLARE
+            column_name text;
+        BEGIN
+            IF (to_jsonb(NEW) - TG_ARGV) IS DISTINCT FROM (to_jsonb(OLD) - TG_ARGV) THEN
+                RAISE EXCEPTION '% rows are append-only', TG_TABLE_NAME USING ERRCODE = 'restrict_violation';
+            END IF;
+            FOREACH column_name IN ARRAY TG_ARGV LOOP
+                IF to_jsonb(OLD) -> column_name <> 'null'::jsonb
+                   AND to_jsonb(OLD) -> column_name IS DISTINCT FROM to_jsonb(NEW) -> column_name THEN
+                    RAISE EXCEPTION '%.% can be set only once', TG_TABLE_NAME, column_name
+                        USING ERRCODE = 'restrict_violation';
+                END IF;
+            END LOOP;
+            RETURN NEW;
+        END;
+        $$
+        """
+    )
+    # Photo evidence is fixed at receipt; the only allowed update is the one-way deletion.
+    op.execute(
+        f"""
+        CREATE FUNCTION community_guard_photo_update() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
+               AND (to_jsonb(NEW) - ARRAY[{PHOTO_DELETION_SQL}]) = (to_jsonb(OLD) - ARRAY[{PHOTO_DELETION_SQL}]) THEN
+                RETURN NEW;
+            END IF;
+            RAISE EXCEPTION 'community_evidence_photos rows change only by deletion'
+                USING ERRCODE = 'restrict_violation';
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION community_ledger_reverses_award() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF NEW.reverses_entry_id IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM contribution_ledger WHERE id = NEW.reverses_entry_id AND entry_type = 'AWARD'
+            ) THEN
+                RAISE EXCEPTION 'contribution_ledger entries may only reference an AWARD'
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            RETURN NEW;
+        END;
+        $$
+        """
+    )
     for name in IMMUTABLE_TABLES:
         op.execute(
             f"CREATE TRIGGER {name}_append_only BEFORE UPDATE ON {name} "
             "FOR EACH ROW EXECUTE FUNCTION community_reject_update()"
         )
+    for name, columns in SET_ONCE_COLUMNS.items():
+        arguments = ", ".join(f"'{column}'" for column in columns)
+        op.execute(
+            f"CREATE TRIGGER {name}_append_only BEFORE UPDATE ON {name} "
+            f"FOR EACH ROW EXECUTE FUNCTION community_guard_set_once({arguments})"
+        )
+    op.execute(
+        "CREATE TRIGGER community_evidence_photos_append_only BEFORE UPDATE ON community_evidence_photos "
+        "FOR EACH ROW EXECUTE FUNCTION community_guard_photo_update()"
+    )
+    op.execute(
+        "CREATE TRIGGER contribution_ledger_reverses_award BEFORE INSERT ON contribution_ledger "
+        "FOR EACH ROW EXECUTE FUNCTION community_ledger_reverses_award()"
+    )
 
 
 def downgrade() -> None:
-    for name in IMMUTABLE_TABLES:
+    for name in (*IMMUTABLE_TABLES, *SET_ONCE_COLUMNS, "community_evidence_photos"):
         op.execute(f"DROP TRIGGER {name}_append_only ON {name}")
-    op.execute("DROP FUNCTION community_reject_update()")
+    op.execute("DROP TRIGGER contribution_ledger_reverses_award ON contribution_ledger")
+    for function in FUNCTIONS:
+        op.execute(f"DROP FUNCTION {function}()")
     for name in TABLES:
         op.drop_table(name)
     bind = op.get_bind()

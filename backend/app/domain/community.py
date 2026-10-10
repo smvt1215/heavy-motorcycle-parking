@@ -39,6 +39,18 @@ def _blank(value: str | None) -> bool:
     return value is None or not value.strip(" \x00")
 
 
+def exif_raw_for_storage(value: str | None, max_length: int) -> str | None:
+    """Raw EXIF string as persisted: blank/NUL-padded values become NULL.
+
+    Values longer than the column are not stored; they are always INVALID, which
+    the database accepts without raw text.
+    """
+    if _blank(value):
+        return None
+    stored = value.strip(" \x00")
+    return stored if len(stored) <= max_length else None
+
+
 def classify_photo_time(
     datetime_original: str | None,
     offset_time_original: str | None,

@@ -84,7 +84,24 @@
 | 新北市政府路邊收費停管場 | 6 個停管場的地址與電話 | — | 不是停車位資料 |
 | data.taipei Open API 清單（13 項，2026-10-10 下載） | 圖書館座位、水利處抽水站／雨量／水位／CCTV、北水處水質與用水量、消防局 EOC、社會住宅、輪行臺北設施、景點統計 | — | 沒有停車相關的 API |
 
-結論：要把臺北 443 個收費機車路段與新北的路邊機車格接上座標，最可靠的路徑是 TDX 的 `ParkingSegment`（路段與幾何）、`ParkingSegmentSpace`（依 `SpaceType` 的格數）與 `ParkingSegmentRate`／`ChargeTime`。接入前要先比對 TDX 與上表官方資料的路段是否一致。
+### 7.1 TDX 實際資料核對（[#41](https://github.com/smvt1215/heavy-motorcycle-parking/issues/41)）
+
+2026-10-10 取得 TDX 金鑰，抓取雙北 `ParkingSegment`、`ParkingSegmentSpace`、`ParkingSegmentRate`、`ParkingSegmentChargeTime` 完整資料（每次請求間隔 20 秒；免費方案很快就回 429）。
+
+| 項目 | 臺北 | 新北 |
+| --- | --- | --- |
+| 路段 | 2,397 列，2,347 個不重複 ID；50 個 ID 重複，其中 29 個內容衝突；全部有多邊形；來源更新 2026-08-20 | 616 個，只有中心點；來源更新 2026-10-09 |
+| 機車位（`SpaceType` 2） | 50 個路段、1,243 格 | 1 個路段、7 格；另有 `SpaceType` 254「其他」1,440 格 |
+| 費率 | 只有小型車（`SpaceType` 1） | 有免費／計次／計時／累進，但沒有機車專屬費率 |
+| 收費時段 | 2,095 列 | 669 列 |
+
+和官方資料比對：
+
+- 停管處 ODS 有 438 個（格數為數字的）收費機車路段、65,081 格。TDX 的 50 個機車路段中，名稱加起迄能對上 ODS 的只有 14 個，而且格數不同。例：立農街2段在 ODS 是機車 50 格、計次 20 元，在 TDX 是 13 格，連到汽車的計時費率。
+- 即使只借用 TDX 路段的位置（不論 `SpaceType`），438 個機車路段中也只有 58 個（8,404 格，約 13%）能用「路名加無序起迄」唯一對上。這還要先去掉 A／B 等名稱後綴，而且 TDX 多邊形是汽車路段的範圍，機車格不一定在同一側。
+- 新北的 TDX 資料幾乎沒有機車路段，補不上公告的 1 萬 6 千格。
+
+結論：TDX 目前**不能**作為雙北收費機車格範圍的可靠來源。依 #41 的驗收條件，資料不一致時只交付差異報告、不授權，所以不寫 TDX 匯入程式。雙北路邊機車格維持第 1～3 節的狀態。TDX 資料若日後改善，可以用同樣方法重新核對（金鑰設定在 `.env` 的 `TDX_CLIENT_ID`／`TDX_CLIENT_SECRET`，不進 repo）。
 
 ## 8. 決定事項
 
@@ -92,4 +109,4 @@
 
 - **政策規則沿用 baseline 的普重值**：`policy_rule` 讓政策規則帶上原始資料的 `normal_heavy`，避免政策（priority 200）贏得最高層後普重變成 UNKNOWN，但這等於新來源借用另一個來源的值。決定改成「分車種選層」，由 [#40](https://github.com/smvt1215/heavy-motorcycle-parking/issues/40) 修改解析器並移除借用；在那之前維持現狀。
 - **新北路邊改用 CSV 完整檔**：已在本輪完成（第 2 節）。
-- **TDX 路段資料**：另開 [#41](https://github.com/smvt1215/heavy-motorcycle-parking/issues/41)，需要 TDX API 金鑰。
+- **TDX 路段資料**：[#41](https://github.com/smvt1215/heavy-motorcycle-parking/issues/41) 已核對，資料不足以接入，只交付差異報告（第 7.1 節）。

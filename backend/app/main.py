@@ -13,6 +13,7 @@ from app.domain.errors import DiscoveryError
 from app.middleware import RequestBodyLimit
 from app.routers.community import dev_router
 from app.routers.community import router as community_router
+from app.routers.community_cases import router as community_cases_router
 from app.routers.health import router as health_router
 from app.routers.parking import router as parking_router
 from app.routers.places import router as places_router
@@ -55,6 +56,11 @@ def create_app() -> FastAPI:
     app.state.places_rate_limiter = RedisRateLimiter(
         get_redis, settings.places_rate_limit_per_minute, prefix="ratelimit"
     )
+    app.state.community_rate_limiter = RedisRateLimiter(
+        get_redis, settings.community_write_rate_limit_per_minute, prefix="community"
+    )
+    # Off by default: eligible community cases go to manual review instead.
+    app.state.community_auto_publish_enabled = settings.community_auto_publish_enabled
 
     @app.middleware("http")
     async def capture_request_time(request: Request, call_next):
@@ -90,13 +96,14 @@ def create_app() -> FastAPI:
     app.include_router(parking_router, prefix="/api/v1")
     app.include_router(places_router, prefix="/api/v1")
     app.include_router(community_router, prefix="/api/v1")
+    app.include_router(community_cases_router, prefix="/api/v1")
     if settings.environment == "DEV":
         app.include_router(dev_router, prefix="/api/v1")
     # Multipart bodies are spooled before handlers run; cap them at the ASGI boundary.
     app.add_middleware(
         RequestBodyLimit,
         max_bytes=settings.report_photo_max_bytes + 64 * 1024,
-        path_pattern=r"/api/v1/reports/[0-9]+/photos",
+        path_pattern=r"/api/v1/(?:reports|community/cases)/[0-9]+/photos",
     )
     return app
 

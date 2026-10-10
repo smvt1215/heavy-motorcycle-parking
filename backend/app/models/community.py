@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -144,10 +145,17 @@ class CommunityParticipant(CreatedAtMixin, Base):
             ["user_id"], ["users.id"], name="fk_community_participants_user_id_users", ondelete="SET NULL"
         ),
         UniqueConstraint("user_id", name="uq_community_participants_user_id"),
+        CheckConstraint(
+            "(suspended_at IS NULL) = (suspended_reason IS NULL)",
+            name="ck_community_participants_suspension_has_reason",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int | None] = mapped_column(Integer)
+    # Set by a moderator (migration 007); suspended participants' stances stop counting.
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    suspended_reason: Mapped[str | None] = mapped_column(String(64))
 
 
 class CommunityCase(TimestampMixin, Base):
@@ -251,6 +259,9 @@ class CommunityCase(TimestampMixin, Base):
     # Optimistic concurrency for moderator writes (409 VERSION_CONFLICT on mismatch).
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     superseded_by_case_id: Mapped[int | None] = mapped_column(Integer)
+    # Written explicitly with the request instant on every change; no ORM onupdate, so an
+    # unchanged instant is not replaced by the database clock.
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CommunityCaseRevision(CreatedAtMixin, Base):

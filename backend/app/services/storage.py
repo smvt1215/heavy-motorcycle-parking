@@ -18,6 +18,8 @@ class ObjectStorage(Protocol):
 
     async def delete(self, key: str) -> None: ...
 
+    async def get(self, key: str) -> bytes: ...
+
 
 class S3ObjectStorage:
     """boto3 client calls run in a worker thread so the event loop stays free."""
@@ -59,3 +61,11 @@ class S3ObjectStorage:
 
     async def delete(self, key: str) -> None:
         await asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=key)
+
+    async def get(self, key: str) -> bytes:
+        try:
+            response = await asyncio.to_thread(self._client.get_object, Bucket=self._bucket, Key=key)
+            return await asyncio.to_thread(response["Body"].read)
+        except Exception as exc:  # noqa: BLE001 - any storage failure is a 503 for the client
+            logger.warning("Photo read failed: %s", type(exc).__name__)
+            raise storage_unavailable() from exc

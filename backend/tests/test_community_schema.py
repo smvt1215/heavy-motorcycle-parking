@@ -733,3 +733,13 @@ def test_prechecks_reference_an_existing_revision(db, t, g):
     ins(db, table, **base, revision=1)
     rejected(db, table, FK, **base, revision=999)
     rejected(db, table, FK, **{**base, "case_id": g["rule"]}, revision=1)
+
+
+def test_participant_suspension_requires_a_reason(db, t, g):
+    table = t["community_participants"]
+    row = table.c.id == g["people"][1]
+    with pytest.raises(IntegrityError) as error, db.begin_nested():
+        db.execute(update(table).where(row).values(suspended_at=NOW))
+    assert error.value.orig.diag.constraint_name == "ck_community_participants_suspension_has_reason"
+    db.execute(update(table).where(row).values(suspended_at=NOW, suspended_reason="ABUSE"))
+    db.execute(update(table).where(row).values(suspended_at=None, suspended_reason=None))

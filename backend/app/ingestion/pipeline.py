@@ -20,8 +20,9 @@ from app.models import ImportBatchStatus, RawImportBatch, RawParkingRecord, RawR
 
 
 class ParkingIngestionPipeline:
-    def __init__(self, session: AsyncSession, adapter: BaseParkingAdapter, *, cache: Any = None):
+    def __init__(self, session: AsyncSession, adapter: BaseParkingAdapter, *, cache: Any = None, clock=None):
         self.session, self.adapter, self.cache = session, adapter, cache
+        self.clock = clock or (lambda: datetime.now(UTC))
         self.source = adapter.source
         self.writer = ParkingIngestionWriter(session, self.source)
 
@@ -45,13 +46,14 @@ class ParkingIngestionPipeline:
     async def record_download_failure(self, kind: str, error: DownloadError) -> ImportResult:
         async with self.session.begin():
             sources = await self.writer.ensure_sources()
+            recorded_at = self.clock()
             batch = RawImportBatch(
                 source_id=sources[kind],
                 feed_kind=kind,
                 raw_payload=_stored_payload(error.evidence),
                 fetched_at=error.fetched_at,
-                started_at=datetime.now(UTC),
-                finished_at=datetime.now(UTC),
+                started_at=recorded_at,
+                finished_at=recorded_at,
                 status=ImportBatchStatus.FAILED,
                 total_records=0,
                 normalized_records=0,
@@ -90,7 +92,7 @@ class ParkingIngestionPipeline:
                 raw_payload=_stored_payload(snapshot.payload),
                 source_updated_at=evidence.source_updated_at,
                 fetched_at=snapshot.fetched_at,
-                started_at=datetime.now(UTC),
+                started_at=self.clock(),
                 status=ImportBatchStatus.RUNNING,
                 total_records=len(records),
                 normalized_records=0,
@@ -246,9 +248,16 @@ class ParkingIngestionPipeline:
         )
         async with self.session.begin():
             batch = await self.session.get(RawImportBatch, batch_id)
-            batch.status, batch.finished_at = status, datetime.now(UTC)
+            observed_finish = self.clock()
+            rolled_back = batch.started_at is not None and observed_finish < batch.started_at
+            batch.status = status
+            batch.finished_at = batch.started_at if rolled_back else observed_finish
+            if rolled_back:
+                warnings = {**(warnings or {}), "BATCH_CLOCK_ROLLBACK": 1}
             batch.normalized_records, batch.failed_records = normalized, failed
             summary = {**({"errors": errors} if errors else {}), **({"warnings": warnings} if warnings else {})}
+            if rolled_back:
+                summary["clock"] = {"observed_finished_at": observed_finish.isoformat()}
             batch.error_summary = summary or None
             total = batch.total_records
         return ImportResult(batch_id, status, total, normalized, failed)

@@ -93,7 +93,7 @@ void main() {
 
   tearDown(() => container.dispose());
 
-  test('initial state uses the Taipei default center and RED', () {
+  test('initial state uses the Taipei default center and LARGE_HEAVY', () {
     expect(state().query.center, const GeoPoint(25.033, 121.5654));
     expect(state().query.vehicle, VehicleType.largeHeavy);
     expect(state().hasSearched, isFalse);

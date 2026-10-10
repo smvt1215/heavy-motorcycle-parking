@@ -10,9 +10,9 @@
 定位或搜尋目的地 → 查詢附近停車 → 依車種合法性過濾 → 顯示距離/空位/費率/來源 → 查看停車區與入口 → Apple Maps / Google Maps 外部導航。
 
 ## Parking space types
-- `HEAVY_ONLY`: 大重專用；普重不可停。
+- `HEAVY_ONLY`: 大重專用；普重依明確規則判斷。
 - `MOTO_SHARED`: 普重／大重共用；以分類級許可為準。
-- `CAR_SHARED`: 汽車共享區；確認大重許可時納入，普重不可停。
+- `CAR_SHARED`: 汽車共享區；確認大重許可時納入，普重依明確規則判斷。
 - `LIGHT_MOTO_ONLY`: 一般機車區；確認普重適用時納入，大重正常搜尋排除。
 
 Four-type classification is descriptive, not the only authority. Explicit per-vehicle tri-state permissions remain authoritative when present.

@@ -12,7 +12,7 @@
 
 `app/ingestion/policies.py` 保存政策代碼、來源 URL、發布日期、生效時間、範圍和明確配置的 authority priority 200。規則沿用既有優先序：區域 > 全場、EXCEPTION > BASELINE、authority priority，最高同層的衝突／未知仍為 UNKNOWN。原始資料 baseline priority 100 不會取代政策，區域特殊禁停 EXCEPTION 仍可覆蓋政策。
 
-政策許可、費率、即時及入口各用自己的 source_id。政策 scope evidence 保存在 parking_rules.notes JSON；費率原文及 scope evidence 保存在 parking_rate_sources.raw_payload。來源資訊端點可取得公告 URL。
+政策許可、費率、即時及入口各用自己的 source_id。政策 scope evidence 保存在 parking_rules.notes JSON；費率原文及 scope evidence 保存在 parking_rate_sources.raw_payload。選車種 API 的各自 provenance 提供來源名稱及 URL；手機可開啟來源原文。
 
 個別區域的許可與政策費率，起日取政策生效、已核對範圍與首次車格快照擷取時間的最晚者。政策公告日不能證明某個車格在過去已有相同分類、限制或時段。首次範圍時間保存為 scope_verified_from；相同範圍後續匯入不重設起日。
 
@@ -22,7 +22,7 @@
 
 [官方名冊（114/05/12）](https://www.traffic.ntpc.gov.tw/websitedowndoc?file=traffic%2F202505141350170.pdf&filedisplay=%E6%96%B0%E5%8C%97%E5%B8%82%E5%81%9C%E8%BB%8A%E5%A0%B4%E5%A4%A7%E5%9E%8B%E9%87%8D%E5%9E%8B%E6%A9%9F%E8%BB%8A%E6%A0%BC%E4%BD%8D%E5%8F%8A%E9%81%A9%E7%95%B6%E7%A9%BA%E9%96%93%E7%B5%B1%E8%A8%88%E8%A1%A8%281140512%29.pdf) 有71處。以行政區及唯一完整名稱核對路外來源，僅容許相同行政區名稱前綴差異；55處取得來源 ID，16處未匹配。結果及 PDF SHA-256 保存於 `backend/app/ingestion/evidence/new_taipei_managed_facilities.json`，隨 backend wheel 打包。
 
-執行時必須同時精確符合來源 ID、名稱、行政區、地址。地址或名稱變更、ID 未核對、沒有明確汽車區時不掛政策。名冊不能證明全部政府資料中的場站都是轄管公有場站；`TYPE` 表示即時資料分類，也不能當成所有權。
+個別場站的政策規則不早於名冊確認範圍的2025-05-12；公告日期仍獨立保存為2025-03-21，不據此推測更早的轄管身份。執行時必須同時精確符合來源 ID、名稱、行政區、地址。地址或名稱變更、ID 未核對、沒有明確汽車區時不掛政策。名冊不能證明全部政府資料中的場站都是轄管公有場站；`TYPE` 表示即時資料分類，也不能當成所有權。
 
 例如 `010152` 四維公園地下停車場只在既有 `CAR_SHARED` 區新增大重政策。機車區及由重機價格建立的容量未知區仍維持 UNKNOWN。不增加大重專用區，不複製 capacity／AVAILABLECAR，也不把小型車費率搬到大重。
 

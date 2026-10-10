@@ -67,7 +67,9 @@ def managed_facility(record: dict[str, Any]) -> dict | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def policy_rule(policy: OfficialPolicy, zone: NormalizedZone, *, schedule=None, evidence=None) -> NormalizedRule:
+def policy_rule(
+    policy: OfficialPolicy, zone: NormalizedZone, *, schedule=None, evidence=None, scope_effective_from=None
+) -> NormalizedRule:
     return NormalizedRule(
         key=policy.code,
         policy_code=policy.code,
@@ -75,7 +77,9 @@ def policy_rule(policy: OfficialPolicy, zone: NormalizedZone, *, schedule=None, 
         large_heavy=True,
         rule_kind=RuleKind.BASELINE,
         authority_priority=policy.authority_priority,
-        effective_from=policy.effective_from,
+        effective_from=max(policy.effective_from, scope_effective_from)
+        if scope_effective_from
+        else policy.effective_from,
         schedule=schedule,
         evidence={"scope": policy.scope, **(evidence or {})},
     )

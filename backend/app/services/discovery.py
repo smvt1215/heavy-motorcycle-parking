@@ -9,7 +9,12 @@ from app.domain.errors import DiscoveryError
 from app.domain.parking import absolute_instant
 from app.domain.schedules import HolidayCalendar
 from app.schemas.parking import NearbyQuery
-from app.services.compatibility import ParkingCompatibilityService, is_nearby_eligible, rollup_nearby_compatibility
+from app.services.compatibility import (
+    ParkingCompatibilityService,
+    _provenance_dict,
+    is_nearby_eligible,
+    rollup_nearby_compatibility,
+)
 from app.services.cursors import SORT_VERSION, CursorCodec, query_fingerprint
 from app.services.ranking import ranking_score, sort_key
 from app.services.rates import resolve_rates
@@ -161,14 +166,7 @@ class ParkingDiscoveryService:
                         "entrance_type": entrance.entrance_type,
                         "heavy_motorcycle_access": entrance.access,
                         "notes": entrance.notes,
-                        "provenance": {
-                            "source_id": entrance.provenance.source_id,
-                            "source_type": entrance.provenance.source_type,
-                            "source_record_id": entrance.provenance.source_record_id,
-                            "source_updated_at": entrance.provenance.source_updated_at,
-                            "fetched_at": entrance.provenance.fetched_at,
-                            "verified_at": entrance.provenance.verified_at,
-                        },
+                        "provenance": _provenance_dict(entrance.provenance),
                     }
                     for entrance in lot.entrances
                 ],

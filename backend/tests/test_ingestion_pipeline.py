@@ -677,3 +677,18 @@ async def test_required_missing_or_future_source_timestamp_means_unknown_freshne
         heavy = next(z for z in lot.zones if z.facts.space_type == "HEAVY_ONLY")
         availability = resolve_availability(heavy.realtime, NOW)
         assert availability["status"] == "AVAILABLE" and availability["freshness"]["status"] == "UNKNOWN"
+
+
+async def test_batch_wall_clock_rollback_does_not_discard_successful_import(live):
+    session, pipeline = live
+    instants = iter([NOW, NOW - timedelta(seconds=1)])
+    pipeline.clock = lambda: next(instants)
+    result = await pipeline.ingest(snapshot())
+    assert result.status == "SUCCEEDED" and result.failed == 0
+    async with session.begin():
+        batch = await session.get(RawImportBatch, result.batch_id)
+        assert batch.started_at == batch.finished_at == NOW
+        assert batch.error_summary["warnings"]["BATCH_CLOCK_ROLLBACK"] == 1
+        assert batch.error_summary["clock"]["observed_finished_at"] == (NOW - timedelta(seconds=1)).isoformat()
+        assert batch.fetched_at == NOW  # Observation/policy times are never clamped to batch time.
+        assert await count(session, ParkingLot) > 0

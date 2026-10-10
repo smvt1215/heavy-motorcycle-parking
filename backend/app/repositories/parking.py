@@ -29,6 +29,8 @@ def source_evidence(row, source: DataSource) -> Provenance:
         source_updated_at=row.source_updated_at,
         fetched_at=row.fetched_at,
         verified_at=getattr(row, "verified_at", None),
+        source_name=source.name,
+        source_url=source.url,
     )
 
 

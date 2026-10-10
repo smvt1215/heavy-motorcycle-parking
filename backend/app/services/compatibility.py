@@ -60,6 +60,8 @@ def _provenance_dict(provenance: Provenance) -> dict[str, Any]:
     return {
         "source_id": provenance.source_id,
         "source_type": provenance.source_type,
+        "source_name": provenance.source_name,
+        "source_url": provenance.source_url,
         "source_record_id": provenance.source_record_id,
         "source_updated_at": _rfc3339(provenance.source_updated_at),
         "fetched_at": _rfc3339(provenance.fetched_at),

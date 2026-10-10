@@ -6,9 +6,8 @@ import '../domain/parking.dart';
 import 'theme.dart';
 import 'tokens.dart';
 
-/// YELLOW/RED plate selector. iOS uses the native sliding segmented control;
-/// Android uses a Material 3 segmented button. Each option shows a plate-colored
-/// swatch *and* its label, and the selected state is announced by semantics.
+/// 普重／大重 selector with formal names announced through semantics.
+/// iOS uses the native sliding control; Android uses a Material segmented button.
 class VehicleSelector extends StatelessWidget {
   const VehicleSelector({
     super.key,

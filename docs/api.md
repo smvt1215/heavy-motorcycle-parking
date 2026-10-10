@@ -24,10 +24,20 @@ Base path: `/api/v1`.
 - `POST /auth/logout`
 - `POST /auth/dev-session` (DEV environment only; not part of the stable contract)
 
-Community verification endpoints (`/community/...`, `/me/community/...`,
-`/me/contributions`, `/parking/{id}/community-observations`, `/moderation/...`)
-are specified in the [community verification contract](community-verification-contract.md)
-and implemented by #34; they are not part of the current OpenAPI document.
+Community verification (#34; contract and errors in the
+[community verification contract](community-verification-contract.md) §9):
+
+- `POST /community/cases`, `POST /community/cases/{id}/revisions`,
+  `POST /community/cases/{id}/photos`, `PUT|DELETE /community/cases/{id}/stance`
+- `GET /me/community/cases`, `GET /me/community/cases/{id}`, `GET /me/contributions`
+- `GET /community/photos/{photo_id}` (uploader or MODERATOR; `Cache-Control: no-store`)
+- `GET /parking/{id}/community-observations` (public, structured summary only)
+- `GET /moderation/cases`, `GET /moderation/cases/{id}`, `POST /moderation/cases/{id}/decisions`,
+  `DELETE /moderation/photos/{photo_id}`, `POST /moderation/source-verifications`,
+  `POST /moderation/source-verifications/{id}/revoke`,
+  `PUT|DELETE /moderation/participants/{id}/suspension` (MODERATOR)
+
+Create, revise, stance and decision writes require an `Idempotency-Key` header.
 
 ## Authentication and authorization
 Public parking discovery endpoints are usable without authentication unless explicitly stated otherwise.
@@ -39,6 +49,7 @@ Protected user-scoped endpoints:
 - `DELETE /favorites/{parking_id}`
 - `PUT /me/vehicle`, `GET /me/reports`, `POST /reports`, `POST /reports/{id}/photos`,
   `PATCH /reports/{id}/status` (MODERATOR role) and `POST /auth/logout`
+- every community verification endpoint above except the public observations list
 
 M8 behavior, error codes and token storage are described in
 [user features](user-features.md).

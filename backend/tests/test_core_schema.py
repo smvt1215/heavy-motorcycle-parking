@@ -55,6 +55,7 @@ TABLES = {
     "community_case_events",
     "contribution_ledger",
     "idempotency_records",
+    "storage_deletion_outbox",
 }
 
 

@@ -19,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -144,10 +145,17 @@ class CommunityParticipant(CreatedAtMixin, Base):
             ["user_id"], ["users.id"], name="fk_community_participants_user_id_users", ondelete="SET NULL"
         ),
         UniqueConstraint("user_id", name="uq_community_participants_user_id"),
+        CheckConstraint(
+            "(suspended_at IS NULL) = (suspended_reason IS NULL)",
+            name="ck_community_participants_suspension_has_reason",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int | None] = mapped_column(Integer)
+    # Set by a moderator (migration 007); suspended participants' stances stop counting.
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    suspended_reason: Mapped[str | None] = mapped_column(String(64))
 
 
 class CommunityCase(TimestampMixin, Base):
@@ -251,6 +259,9 @@ class CommunityCase(TimestampMixin, Base):
     # Optimistic concurrency for moderator writes (409 VERSION_CONFLICT on mismatch).
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     superseded_by_case_id: Mapped[int | None] = mapped_column(Integer)
+    # Written explicitly with the request instant on every change; no ORM onupdate, so an
+    # unchanged instant is not replaced by the database clock.
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CommunityCaseRevision(CreatedAtMixin, Base):
@@ -630,3 +641,33 @@ class IdempotencyRecord(CreatedAtMixin, Base):
     response_status: Mapped[int] = mapped_column(SmallInteger)
     response_body: Mapped[dict[str, Any]] = mapped_column(JSONB)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class StorageDeletion(CreatedAtMixin, Base):
+    """Durable request to remove a private object (migration 007).
+
+    Written in the same transaction that clears the photo row, then completed once
+    object storage confirms removal; pending rows are retried.
+    """
+
+    __tablename__ = "storage_deletion_outbox"
+    __table_args__ = (
+        UniqueConstraint("storage_key", name="uq_storage_deletion_outbox_storage_key"),
+        CheckConstraint("attempts >= 0", name="ck_storage_deletion_outbox_attempts_nonnegative"),
+        CheckConstraint(
+            "completed_at IS NULL OR completed_at >= requested_at",
+            name="ck_storage_deletion_outbox_completed_after_requested",
+        ),
+        Index(
+            "ix_storage_deletion_outbox_pending",
+            "requested_at",
+            postgresql_where=text("completed_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    storage_key: Mapped[str] = mapped_column(String(1024))
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    last_error: Mapped[str | None] = mapped_column(String(200))

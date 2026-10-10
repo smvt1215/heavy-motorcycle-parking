@@ -11,15 +11,49 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from enum import StrEnum
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
-from app.models.enums import CasePublicationState, ContributionEntryType, PhotoTimeStatus, PublicationStatus
+from app.models.enums import (
+    CaseEventType,
+    CasePublicationState,
+    CaseStance,
+    ContributionEntryType,
+    PhotoTimeStatus,
+    PrecheckCode,
+    PrecheckOutcome,
+    PublicationBasis,
+    PublicationStatus,
+)
 
 CORROBORATION_THRESHOLD = 3
 PHOTO_WINDOW = timedelta(days=30)
 OBSERVATION_TERM = timedelta(days=90)
 IDEMPOTENCY_TTL = timedelta(hours=24)
 TIME_PARSER_VERSION = "exif-time-1"
+
+_MODERATOR_EVENTS = frozenset(
+    (
+        CaseEventType.MANUAL_ACCEPTED,
+        CaseEventType.MANUAL_REJECTED,
+        CaseEventType.EVIDENCE_REQUESTED,
+        CaseEventType.SUPERSEDED,
+        CaseEventType.RESUMED,
+        CaseEventType.WITHDRAWN,
+        CaseEventType.PHOTO_DELETED,
+        CaseEventType.STANCE_INVALIDATED,
+    )
+)
+
+
+def timeline_actor(
+    event_type: CaseEventType, actor_participant_id: int | None, viewer_participant_id: int | None
+) -> Literal["SYSTEM", "YOU", "MODERATOR", "PARTICIPANT"]:
+    if actor_participant_id is None:
+        return "SYSTEM"
+    if actor_participant_id == viewer_participant_id:
+        return "YOU"
+    return "MODERATOR" if event_type in _MODERATOR_EVENTS else "PARTICIPANT"
+
 
 _DATETIME = re.compile(r"^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$")
 _OFFSET = re.compile(r"^([+-])(\d{2}):(\d{2})$")
@@ -160,3 +194,325 @@ def effective_points(entries: Iterable[LedgerEntry]) -> int:
         elif entry.entry_type == ContributionEntryType.UNFREEZE:
             frozen[entry.case_id] = False
     return sum(points for case_id, points in totals.items() if not frozen.get(case_id, False))
+
+
+# --- Deterministic precheck -------------------------------------------------------------
+
+PRECHECK_RULE_VERSION = "precheck-1"
+
+
+class Decision(StrEnum):
+    PUBLISH = "PUBLISH"
+    AWAIT = "AWAIT"
+    MANUAL = "MANUAL"
+    SUSPEND = "SUSPEND"
+    KEEP = "KEEP"
+
+
+@dataclass(frozen=True)
+class EvidencePhoto:
+    photo_id: int
+    sha256: str
+    time_status: PhotoTimeStatus
+    captured_at: datetime | None
+    deleted: bool = False
+
+
+@dataclass(frozen=True)
+class StanceInput:
+    stance_id: int
+    participant_id: int
+    stance: CaseStance
+    observed_value: dict | None
+    photos: tuple[EvidencePhoto, ...] = ()
+    participant_suspended: bool = False
+
+
+@dataclass(frozen=True)
+class CaseInput:
+    low_risk: bool
+    author_participant_id: int
+    author_suspended: bool
+    proposed_value: dict
+    original_photos: tuple[EvidencePhoto, ...]
+    stances: tuple[StanceInput, ...]
+    publication_state: CasePublicationState
+    publication_basis: PublicationBasis | None
+    published_until: datetime | None
+    auto_publish_enabled: bool
+    # Photos of withdrawn/invalidated stances and earlier revisions: they never vote,
+    # but their hashes still reserve the image for duplicate detection.
+    inactive_photos: tuple[EvidencePhoto, ...] = ()
+    # Values of other live published observations for the same lot, zone and fact.
+    published_values: tuple[dict, ...] = ()
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    code: PrecheckCode
+    outcome: PrecheckOutcome
+    reason_code: str | None = None
+    detail: dict | None = None
+
+
+@dataclass(frozen=True)
+class PrecheckReport:
+    outcome: PrecheckOutcome
+    decision: Decision
+    results: tuple[CheckResult, ...]
+    supporters: tuple[int, ...]
+    objectors: tuple[int, ...]
+    # Photos that actually counted as independent evidence in this evaluation.
+    counted_photo_ids: tuple[int, ...] = ()
+
+
+def meets_corroboration_requirements(report: PrecheckReport) -> bool:
+    """All factual checks pass; the deployment's auto-publication switch is separate."""
+    return all(
+        result.outcome == PrecheckOutcome.PASS
+        for result in report.results
+        if result.code != PrecheckCode.PUBLICATION_ELIGIBILITY
+    )
+
+
+def _counted(photos, first_copy: dict[str, int], counts, counted_ids: list[int]) -> tuple[int, int]:
+    """(counted, duplicates). Only the first stored copy of an image (lowest photo ID in
+    the case, including deleted, ineligible and inactive photos) can count, so a later
+    copy of the same image never becomes independent evidence, whatever its owner."""
+    counted = duplicates = 0
+    for photo in photos:
+        eligible = not photo.deleted and counts(photo)
+        if not eligible:
+            continue
+        if first_copy[photo.sha256] != photo.photo_id:
+            duplicates += 1
+            continue
+        counted += 1
+        counted_ids.append(photo.photo_id)
+    return counted, duplicates
+
+
+def evaluate_case(case: CaseInput, now: datetime) -> PrecheckReport:
+    """Precheck a case revision. No AI or confidence score decides publication.
+
+    Before publication a photo counts only when VALID at receipt and still within
+    the 30-day window at `now`; once published, recounting ignores natural ageing.
+    Stances from the author or suspended participants never count. A valid
+    objection opposes with independent eligible evidence and a different value.
+    """
+    unpublished = case.publication_state == CasePublicationState.UNPUBLISHED
+    if unpublished:
+
+        def counts(photo: EvidencePhoto) -> bool:
+            return counts_at_publication(photo.time_status, photo.captured_at, now)
+    else:
+
+        def counts(photo: EvidencePhoto) -> bool:
+            return photo.time_status == PhotoTimeStatus.VALID
+
+    results: list[CheckResult] = []
+
+    def add(code, outcome, reason=None, detail=None):
+        results.append(CheckResult(code, outcome, reason, detail))
+
+    if case.author_suspended:
+        add(PrecheckCode.IDENTITY, PrecheckOutcome.NEEDS_MANUAL, "AUTHOR_SUSPENDED")
+    else:
+        add(PrecheckCode.IDENTITY, PrecheckOutcome.PASS)
+    add(PrecheckCode.REQUIRED_FIELDS, PrecheckOutcome.PASS)
+    add(PrecheckCode.SCOPE, PrecheckOutcome.PASS)
+
+    first_copy: dict[str, int] = {}
+    every_photo = (
+        *case.original_photos,
+        *(photo for stance in case.stances for photo in stance.photos),
+        *case.inactive_photos,
+    )
+    for photo in sorted(every_photo, key=lambda item: item.photo_id):
+        first_copy.setdefault(photo.sha256, photo.photo_id)
+    counted_ids: list[int] = []
+    original, duplicates = _counted(case.original_photos, first_copy, counts, counted_ids)
+    supporters: list[int] = []
+    objectors: list[int] = []
+    for stance in case.stances:
+        if stance.participant_id == case.author_participant_id or stance.participant_suspended:
+            continue
+        if stance.stance == CaseStance.CANNOT_CONFIRM:
+            continue
+        stance_photo_ids: list[int] = []
+        counted, dup = _counted(stance.photos, first_copy, counts, stance_photo_ids)
+        duplicates += dup
+        if not counted:
+            continue
+        if stance.stance == CaseStance.SUPPORT:
+            # Support counts only for the value actually proposed (a later revision
+            # invalidates support for an earlier value).
+            if stance.observed_value == case.proposed_value:
+                supporters.append(stance.participant_id)
+                counted_ids.extend(stance_photo_ids)
+        elif stance.observed_value != case.proposed_value:
+            objectors.append(stance.participant_id)
+            counted_ids.extend(stance_photo_ids)
+    uploaded = any(not photo.deleted for photo in case.original_photos)
+    if original:
+        add(PrecheckCode.PHOTO_TIME, PrecheckOutcome.PASS)
+    elif uploaded:
+        add(PrecheckCode.PHOTO_TIME, PrecheckOutcome.NEEDS_MANUAL, "ORIGINAL_PHOTO_TIME_UNVERIFIED")
+    elif len(supporters) >= CORROBORATION_THRESHOLD:
+        # Corroborated but the author never uploaded: a person must look at it.
+        add(PrecheckCode.PHOTO_TIME, PrecheckOutcome.NEEDS_MANUAL, "ORIGINAL_PHOTO_MISSING")
+    else:
+        # The author may still be uploading; wait instead of queueing for review.
+        add(PrecheckCode.PHOTO_TIME, PrecheckOutcome.FAIL, "ORIGINAL_PHOTO_MISSING")
+    if case.low_risk:
+        add(PrecheckCode.SOURCE_APPLICABILITY, PrecheckOutcome.PASS)
+    else:
+        add(PrecheckCode.SOURCE_APPLICABILITY, PrecheckOutcome.NEEDS_MANUAL, "NO_VERIFIED_PARSER")
+    add(PrecheckCode.EVIDENCE_DUPLICATE, PrecheckOutcome.PASS, detail={"duplicates_ignored": duplicates})
+
+    if len(supporters) >= CORROBORATION_THRESHOLD:
+        add(PrecheckCode.CORROBORATION, PrecheckOutcome.PASS, detail={"supporters": len(supporters)})
+    else:
+        add(
+            PrecheckCode.CORROBORATION,
+            PrecheckOutcome.FAIL,
+            "INSUFFICIENT_CORROBORATION",
+            {"supporters": len(supporters), "required": CORROBORATION_THRESHOLD},
+        )
+    conflicting = [value for value in case.published_values if value != case.proposed_value]
+    if objectors:
+        add(
+            PrecheckCode.SOURCE_CONFLICT, PrecheckOutcome.NEEDS_MANUAL, "VALID_OBJECTION", {"objectors": len(objectors)}
+        )
+    elif not case.low_risk:
+        # Source-backed rules, rates and entrances are resolved by their own engine; this
+        # check does not compare against them, so it never reports a pass for these facts.
+        add(PrecheckCode.SOURCE_CONFLICT, PrecheckOutcome.NEEDS_MANUAL, "EXISTING_FACTS_NOT_COMPARED")
+    elif conflicting:
+        add(
+            PrecheckCode.SOURCE_CONFLICT,
+            PrecheckOutcome.NEEDS_MANUAL,
+            "CONFLICTS_WITH_PUBLISHED_OBSERVATION",
+            {"conflicting": len(conflicting)},
+        )
+    else:
+        add(PrecheckCode.SOURCE_CONFLICT, PrecheckOutcome.PASS)
+
+    blocking = {result.outcome for result in results}
+    if PrecheckOutcome.NEEDS_MANUAL in blocking or PrecheckOutcome.FAIL in blocking:
+        add(PrecheckCode.PUBLICATION_ELIGIBILITY, PrecheckOutcome.FAIL, "NOT_ELIGIBLE")
+    elif not case.auto_publish_enabled:
+        add(PrecheckCode.PUBLICATION_ELIGIBILITY, PrecheckOutcome.NEEDS_MANUAL, "AUTO_PUBLISH_DISABLED")
+    else:
+        add(PrecheckCode.PUBLICATION_ELIGIBILITY, PrecheckOutcome.PASS)
+
+    outcomes = {result.outcome for result in results}
+    outcome = (
+        PrecheckOutcome.NEEDS_MANUAL
+        if PrecheckOutcome.NEEDS_MANUAL in outcomes
+        else PrecheckOutcome.FAIL
+        if PrecheckOutcome.FAIL in outcomes
+        else PrecheckOutcome.PASS
+    )
+    return PrecheckReport(
+        outcome,
+        _decide(case, now, results, supporters, objectors),
+        tuple(results),
+        tuple(supporters),
+        tuple(objectors),
+        tuple(sorted(counted_ids)),
+    )
+
+
+def _decide(case, now, results, supporters, objectors) -> Decision:
+    state = case.publication_state
+    if state == CasePublicationState.UNPUBLISHED:
+        outcomes = {result.code: result.outcome for result in results}
+        if PrecheckOutcome.NEEDS_MANUAL in outcomes.values():
+            return Decision.MANUAL
+        return (
+            Decision.PUBLISH
+            if outcomes[PrecheckCode.PUBLICATION_ELIGIBILITY] == PrecheckOutcome.PASS
+            else Decision.AWAIT
+        )
+    if state != CasePublicationState.PUBLISHED:
+        return Decision.KEEP
+    if derive_publication_status(state, case.published_until, now) == PublicationStatus.EXPIRED:
+        return Decision.KEEP
+    # A suspended author or a valid objection takes any live observation back to review.
+    if objectors or case.author_suspended:
+        return Decision.SUSPEND
+    if case.publication_basis == PublicationBasis.COMMUNITY_CORROBORATED:
+        photo_time = next(result for result in results if result.code == PrecheckCode.PHOTO_TIME)
+        # Withdrawn support or deleted evidence suspends a community-corroborated observation.
+        if len(supporters) < CORROBORATION_THRESHOLD or photo_time.outcome != PrecheckOutcome.PASS:
+            return Decision.SUSPEND
+    return Decision.KEEP
+
+
+# --- Proposal / observation values -------------------------------------------------------
+
+_ENTRANCE_TYPES = {"VEHICLE", "PEDESTRIAN", "MIXED", None}
+
+
+def _strict_bool(value) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError("must be true or false")
+    return value
+
+
+def normalize_value(fact_type: str, value) -> dict:
+    """Strictly validate a proposed/observed value for a fact type; unknown keys are rejected.
+
+    A value never expresses "unknown": riders who cannot tell use CANNOT_CONFIRM.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("value must be an object")
+
+    def keys(required: set[str], optional: set[str] = frozenset()) -> None:
+        present = set(value)
+        if not required <= present or not present <= required | optional:
+            raise ValueError(f"value keys must be {sorted(required | optional)}")
+
+    if fact_type in ("LIGHTING", "RAIN_COVER", "CHARGING"):
+        keys({"present"})
+        return {"present": _strict_bool(value["present"])}
+    if fact_type == "PARKING_PERMISSION":
+        keys({"allowed"})
+        return {"allowed": _strict_bool(value["allowed"])}
+    if fact_type == "RATE":
+        keys({"raw_text"})
+        text = value["raw_text"]
+        if not isinstance(text, str) or not text.strip() or len(text) > 500:
+            raise ValueError("raw_text must be 1-500 characters")
+        return {"raw_text": text.strip()}
+    if fact_type == "ENTRANCE_ACCESS":
+        keys({"heavy_motorcycle_access"}, {"entrance_id"})
+        entrance_id = value.get("entrance_id")
+        if entrance_id is not None and (
+            isinstance(entrance_id, bool) or not isinstance(entrance_id, int) or entrance_id < 1
+        ):
+            raise ValueError("entrance_id must be a positive integer or null")
+        return {"entrance_id": entrance_id, "heavy_motorcycle_access": _strict_bool(value["heavy_motorcycle_access"])}
+    if fact_type == "ENTRANCE_LOCATION":
+        keys({"latitude", "longitude"}, {"entrance_type"})
+        lat, lng = value["latitude"], value["longitude"]
+        for number in (lat, lng):
+            if isinstance(number, bool) or not isinstance(number, int | float):
+                raise ValueError("latitude/longitude must be numbers")
+        if not (21.5 <= lat <= 26.5 and 118.0 <= lng <= 122.5):
+            raise ValueError("coordinates must be within Taiwan")
+        entrance_type = value.get("entrance_type")
+        if entrance_type not in _ENTRANCE_TYPES:
+            raise ValueError("entrance_type must be VEHICLE, PEDESTRIAN, MIXED or null")
+        return {"latitude": float(lat), "longitude": float(lng), "entrance_type": entrance_type}
+    raise ValueError("unsupported fact type")
+
+
+def observation_label(fact_type: str, basis: PublicationBasis | None) -> str | None:
+    """Public label for an entrance-location observation; never a confirmed-access claim."""
+    if fact_type != "ENTRANCE_LOCATION":
+        return None
+    if basis == PublicationBasis.COMMUNITY_CORROBORATED:
+        return "社群核實位置・通行性未確認"
+    return "人工複審採納位置・通行性未確認"

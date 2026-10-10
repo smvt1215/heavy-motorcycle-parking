@@ -4,7 +4,8 @@ Static:   新北市路外公共停車場資訊 (B1464EF0-9C7C-4A6F-ABF7-6BDF3284
 Realtime: 新北市公有路外停車場即時賸餘車位數 (E09B35A5-A738-48CC-B0F5-570B67AD9C78)
 Both are paged JSON arrays (`?page=N&size=1000`). The downloader stores
 `{"page_size": 1000, "pages": [[...], ...]}`; file replay also accepts one plain
-array. Neither feed publishes an update time, so `source_updated_at` is None.
+array, and the roadside subclass reads a decoded CSV envelope (`{"format": "csv", "rows": [...]}`).
+Neither feed publishes an update time, so `source_updated_at` is None.
 
 Conservative mapping policy (same normalized contract as Taipei):
 
@@ -139,6 +140,11 @@ class NewTaipeiParkingAdapter(BaseParkingAdapter):
     def records(self, payload: Any) -> list[Any]:
         if isinstance(payload, list):
             return list(payload)
+        if isinstance(payload, dict) and payload.get("format") == "csv":
+            rows = payload.get("rows")
+            if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+                raise RecordError("INVALID_ENVELOPE", "CSV envelope rows must be a list of objects")
+            return list(rows)
         pages = payload.get("pages") if isinstance(payload, dict) else None
         if not isinstance(pages, list) or not all(isinstance(page, list) for page in pages):
             raise RecordError("INVALID_ENVELOPE", "payload must be a JSON array or {'pages': [[...], ...]}")

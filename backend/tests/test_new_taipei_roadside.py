@@ -30,8 +30,8 @@ def motor(**kwargs):
 
 def test_real_sample_and_source_does_not_grant_heavy_or_guess_status_codes():
     assert parser().parse_args(["--city", "new_taipei_roadside"]).city == ADAPTER.city
-    assert ADAPTER.source.feeds["static"].page_size == 1000
-    assert ADAPTER.source.feeds["static"].max_pages == 100
+    # Static cells come from the complete CSV file; see test_new_taipei_roadside_csv.
+    assert ADAPTER.source.feeds["static"].document_format == "csv"
     assert ADAPTER.source.feeds["static"].reconcile_min_ratio == 0.8
     assert ADAPTER.records({"pages": [SAMPLES]}) == SAMPLES
     for record in SAMPLES:

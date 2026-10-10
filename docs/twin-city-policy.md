@@ -32,18 +32,21 @@
 
 ## 新北路邊介接
 
-[新北市路邊停車位資訊](https://data.gov.tw/dataset/122901) 的 JSON 端點：
+[新北市路邊停車位資訊](https://data.gov.tw/dataset/122901)：static 讀 CSV 完整檔，realtime 讀分頁 JSON。
 
-`https://data.ntpc.gov.tw/api/datasets/54a507c4-c038-41b5-bf60-bbecb9d052c6/json`
+- static：`https://data.ntpc.gov.tw/api/datasets/54a507c4-c038-41b5-bf60-bbecb9d052c6/csv/file`
+- realtime：`https://data.ntpc.gov.tw/api/datasets/54a507c4-c038-41b5-bf60-bbecb9d052c6/json`
+
+2026-10-10 的分頁 JSON 一直比 CSV 少 605 組 `(id, roadid)`，CSV 的 31,560 列與資料集標示的筆數相同，因此 static 改用 CSV。CSV 解碼成 `{"format": "csv", "sha256", "header", "rows"}` 保存；必須是 UTF-8，且每列欄位數與標頭相同，否則整份拒絕（`INVALID_CSV`）並保存原始位元組。
 
 ```bash
 python -m app.ingestion.cli --city new_taipei_roadside --feed all
 python -m app.ingestion.cli --city new_taipei_roadside --feed static \
-  --static-file tests/fixtures/new_taipei/roadside_sample.json \
+  --static-file tests/fixtures/new_taipei/roadside_real.csv \
   --fetched-at 2026-10-10T02:00:00Z --no-cache
 ```
 
-static 與 realtime 使用不同來源代碼，保留相同來源的原始 payload。每頁1000筆、最多100頁；失敗頁不當成完整快照，資料驟減低於80%時不撤回缺漏車格。使用獨立 namespace、鎖及快取鍵，避免與路外 ID 撞號。
+static 與 realtime 使用不同來源代碼，保留相同來源的原始 payload。`.csv` 檔以 CSV 重播，其他副檔名以 JSON 重播。realtime 每頁1000筆、最多100頁，失敗頁不當成完整快照。static 資料驟減低於80%時不撤回缺漏車格。使用獨立 namespace、鎖及快取鍵，避免與路外 ID 撞號。
 
 | 欄位 | 使用方式 |
 | --- | --- |

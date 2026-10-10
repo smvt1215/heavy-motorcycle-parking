@@ -17,6 +17,8 @@ class FeedPolicy:
     # Static only: skip retiring absent lots when a snapshot has fewer records than this
     # fraction of the last fully reconciled snapshot. None keeps complete-snapshot semantics.
     reconcile_min_ratio: float | None = None
+    # "json" or "csv". A CSV document is decoded into a {"format": "csv", ...} envelope.
+    document_format: str = "json"
 
 
 @dataclass(frozen=True)
@@ -113,18 +115,28 @@ NEW_TAIPEI = CitySource(
 )
 
 NEW_TAIPEI_ROADSIDE_DATASET = "54a507c4-c038-41b5-bf60-bbecb9d052c6"
+# Static cells come from the complete CSV file: on 2026-10-10 the paged JSON API
+# consistently omitted 605 (id, roadid) pairs that the CSV (31,560 rows, matching the
+# dataset's declared count) contains. Realtime stays paged JSON.
 NEW_TAIPEI_ROADSIDE_FEEDS = {
-    kind: FeedPolicy(
-        kind,
-        f"NEW_TAIPEI_ROADSIDE_{kind.upper()}",
-        f"新北市路邊停車位資訊（{kind}）",
+    "static": FeedPolicy(
+        "static",
+        "NEW_TAIPEI_ROADSIDE_STATIC",
+        "新北市路邊停車位資訊（static）",
+        f"https://data.ntpc.gov.tw/api/datasets/{NEW_TAIPEI_ROADSIDE_DATASET}/csv/file",
+        86400,
+        reconcile_min_ratio=0.8,
+        document_format="csv",
+    ),
+    "realtime": FeedPolicy(
+        "realtime",
+        "NEW_TAIPEI_ROADSIDE_REALTIME",
+        "新北市路邊停車位資訊（realtime）",
         f"https://data.ntpc.gov.tw/api/datasets/{NEW_TAIPEI_ROADSIDE_DATASET}/json",
-        180 if kind == "realtime" else 86400,
+        180,
         page_size=1000,
         max_pages=100,
-        reconcile_min_ratio=0.8 if kind == "static" else None,
-    )
-    for kind in ("static", "realtime")
+    ),
 }
 NEW_TAIPEI_ROADSIDE_SOURCE = CitySource(
     key="new_taipei_roadside",

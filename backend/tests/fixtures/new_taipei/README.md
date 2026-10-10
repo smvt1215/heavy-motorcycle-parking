@@ -8,6 +8,8 @@
 
 `offstreet_roster_real.json` holds nine unmodified offstreet records captured on 2026-10-10 (1,384-row snapshot) for roster reconciliation: two captured managed facilities and the live near-name leads for unmatched roster rows. Near names remain leads; they are not evidence that a lot is transport-managed.
 
+`roadside_real.csv` holds ten rows from the official complete CSV file of the same dataset (5,134,622 bytes, 31,560 rows, downloaded 2026-10-10): four motorcycle cells including `159680`, which the paged JSON API omitted, two car cells and all four rows that share id `968` with different roads. Values are unmodified; rows were re-serialized with a UTF-8 BOM and CRLF like the source.
+
 Policy tests which replace a roadside sample with `機車停車位` are explicitly synthetic. They test the scope contract, not factual identification of a real paid motorcycle cell.
 
 Source ownership mapping and limitations: [雙北政策與資料](../../../../docs/twin-city-policy.md).

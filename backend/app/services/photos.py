@@ -35,13 +35,37 @@ def invalid_photo(message: str) -> DiscoveryError:
     return DiscoveryError("INVALID_PHOTO", message, 422)
 
 
+# Undecodable bytes still classify as INVALID instead of looking absent.
+UNDECODABLE = "\ufffd"
+
+
 @dataclass(frozen=True)
 class ExifTime:
-    """Normalized raw strings as stored; blank, undecodable or overlong values are None."""
+    """Raw EXIF original-time strings.
 
-    datetime_original: str | None = None
-    offset_time_original: str | None = None
-    subsec_time_original: str | None = None
+    `raw_*` keep the full decoded value for classification; the plain fields are the
+    length-limited values stored (blank, undecodable or overlong become None).
+    """
+
+    raw_datetime_original: str | None = None
+    raw_offset_time_original: str | None = None
+    raw_subsec_time_original: str | None = None
+
+    @property
+    def datetime_original(self) -> str | None:
+        return _stored(self.raw_datetime_original, 32)
+
+    @property
+    def offset_time_original(self) -> str | None:
+        return _stored(self.raw_offset_time_original, 8)
+
+    @property
+    def subsec_time_original(self) -> str | None:
+        return _stored(self.raw_subsec_time_original, 16)
+
+
+def _stored(value: str | None, max_length: int) -> str | None:
+    return None if value == UNDECODABLE else exif_raw_for_storage(value, max_length)
 
 
 @dataclass(frozen=True)
@@ -55,13 +79,15 @@ class ProcessedPhoto:
     exif_time: ExifTime = field(default_factory=ExifTime)
 
 
-def _exif_text(value, max_length: int) -> str | None:
+def _exif_text(value) -> str | None:
+    if value is None:
+        return None
     if isinstance(value, bytes):
         try:
-            value = value.decode("ascii")
+            return value.decode("ascii")
         except UnicodeDecodeError:
-            return None
-    return exif_raw_for_storage(value, max_length) if isinstance(value, str) else None
+            return UNDECODABLE
+    return value if isinstance(value, str) else UNDECODABLE
 
 
 def read_exif_time(image: Image.Image) -> ExifTime:
@@ -70,9 +96,9 @@ def read_exif_time(image: Image.Image) -> ExifTime:
     except Exception:  # noqa: BLE001 - unreadable EXIF is simply missing metadata
         return ExifTime()
     return ExifTime(
-        _exif_text(exif.get(DATETIME_ORIGINAL), 32),
-        _exif_text(exif.get(OFFSET_TIME_ORIGINAL), 8),
-        _exif_text(exif.get(SUBSEC_TIME_ORIGINAL), 16),
+        _exif_text(exif.get(DATETIME_ORIGINAL)),
+        _exif_text(exif.get(OFFSET_TIME_ORIGINAL)),
+        _exif_text(exif.get(SUBSEC_TIME_ORIGINAL)),
     )
 
 

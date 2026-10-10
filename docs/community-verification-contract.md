@@ -2,7 +2,7 @@
 
 更新日期：2026-10-10。Issue：[#32](https://github.com/smvt1215/heavy-motorcycle-parking/issues/32)（契約）、[#34](https://github.com/smvt1215/heavy-motorcycle-parking/issues/34)（後端實作）。來源計畫：[社群核實計畫](community-verification-plan.md)。
 
-本文件是 #33–#37 實作要遵守的規格。#32 交付資料庫遷移 `006_community_verification`、ORM 模型、`app/domain/community.py` 的純函式與照片上限預設值；#34 實作了第 9 節的後端 API（遷移 `007_participant_suspension`、`app/services/community_cases.py`、`app/routers/community_cases.py`），已在 OpenAPI 中。**手機與 Web 工作台畫面尚未實作**（#35、#36）。
+本文件是 #33–#37 實作要遵守的規格。#32 交付資料庫遷移 `006_community_verification`、ORM 模型、`app/domain/community.py` 的純函式與照片上限預設值；#34 實作了第 9 節的後端 API（遷移 `007_community_moderation`、`app/services/community_cases.py`、`app/routers/community_cases.py`），已在 OpenAPI 中。**手機與 Web 工作台畫面尚未實作**（#35、#36）。
 
 不變的部分：`/api/v1` 既有端點、共通 zone wire schema、規則優先序與 `sort_version=1` 都不變。社群資料不寫入 `parking_rules`、`parking_rates`、`parking_realtime`、`parking_entrances` 或 `parking_facilities`。
 
@@ -137,7 +137,7 @@ DB 約束：
 
 - 每位參與者在每個案件同時只能有一個有效立場（部分唯一索引 `uq_community_case_stances_active`）。改變立場時，先撤回舊立場（`withdrawn_at`），再新增一筆，歷史全部保留。被認定無效時記錄 `invalidated_at` 與 `invalidated_reason`。立場的內容不能修改，這三個欄位只能從 NULL 設定一次（trigger `community_guard_set_once`）。revision 同樣不能修改，只有 `description_approved_at` 可以設定一次。
 - `SUPPORT`、`OPPOSE` 必須附觀察值；`CANNOT_CONFIRM` 不需要。
-- **自動補證門檻**（`CORROBORATION_THRESHOLD = 3`）：低風險案件除了原作者之外，還要有 3 位參與者各自提出 `SUPPORT`、附自己的觀察值，以及至少一張發布時仍符合條件的照片。原回報本身也要有符合條件的照片。重複的 evidence ID 或 SHA-256 不算獨立證據。作者的支持不計入。
+- **自動補證門檻**（`CORROBORATION_THRESHOLD = 3`）：低風險案件除了原作者之外，還要有 3 位參與者各自提出 `SUPPORT`、附與目前提議值**相同**的觀察值（不同值必須用 `OPPOSE`，API 回 `422 SUPPORT_VALUE_MISMATCH`；補件改變提議值後，舊值的支持不再計入），以及至少一張發布時仍符合條件的照片。原回報本身也要有符合條件的照片。重複的 evidence ID 或 SHA-256 不算獨立證據；已刪除或不符資格的照片仍保留其雜湊，之後同一張圖不會變成獨立證據。作者的支持不計入。
 - **有效異議**：提出者是未停權的登入者，不是重複支持的證據，指向同一事實與區域，附符合條件的照片和不同的觀察值。有效異議會暫停已發布的觀察並轉人工；未達條件的異議可以送人工，但不能自動暫停。
 - **初審**：每次執行寫入 `community_prechecks`（規則版本、整體結果、時間；`(case_id, revision)` 必須指向既有的 revision），每項檢查寫入 `community_precheck_results`：
 
@@ -187,7 +187,7 @@ DB 約束：
 
 - 照片永遠不公開。提交者只能透過媒體代理端點看自己上傳的照片和原始時間欄位；別人的私人證據只有 `MODERATOR` 可以看。回應不暴露儲存 key，並帶 `Cache-Control: no-store`。
 - 公開資料只有結構化摘要：事實類型、範圍、值、`publication_basis`、發布狀態、首次發布時間、期限，以及（社群核實時）核實人數。不顯示作者或補證者，也不顯示未經審核的文字。自由文字要經管理員核准（`description_approved_at`）才能顯示。
-- 建立案件、補件、立場、異議、管理員決定都要帶 `Idempotency-Key` header（1–128 字元）。後端保存 24 小時（`IDEMPOTENCY_TTL`），以 `(user_id, operation, key)` 為唯一值：同一個 key 但請求內容不同，回 `422 IDEMPOTENCY_KEY_REUSED`；內容相同的重試，回傳當初的狀態碼與內容。過期紀錄由讀取時判斷，不依賴背景排程。
+- 建立案件、補件、立場（含撤回立場）、異議、管理員決定都要帶 `Idempotency-Key` header（1–128 字元）。重送不會再計入限流；處理失敗時會重新檢查同一個 key，若並行請求已經完成，就回傳該結果。後端保存 24 小時（`IDEMPOTENCY_TTL`），以 `(user_id, operation, key)` 為唯一值：同一個 key 但請求內容不同，回 `422 IDEMPOTENCY_KEY_REUSED`；內容相同的重試，回傳當初的狀態碼與內容。過期紀錄由讀取時判斷，不依賴背景排程。
 - 管理員寫入時帶 `expected_version`；與案件目前的 `version` 不符時回 `409 VERSION_CONFLICT`。計票、發布、版本與積分在同一個交易內更新。
 
 ## 9. API（#34 已實作）
@@ -263,6 +263,8 @@ DB 約束：
 - `409 CASE_NOT_AWAITING_EVIDENCE`
 - `422 SCOPE_INVALID`（車種或區域不符合第 1 節）
 - `422 VALUE_INVALID`（提議值或觀察值不符合第 1 節的格式）
+- `422 SUPPORT_VALUE_MISMATCH`（`SUPPORT` 的觀察值與目前提議值不同）
+- `404 SOURCE_NOT_FOUND`、`404 PARKING_NOT_FOUND`（來源核實參照的資料不存在）
 - `422 IDEMPOTENCY_KEY_INVALID`（不是 1–128 個可見 ASCII 字元）
 - `409 CASE_CLOSED`（已駁回、已取代或已撤回）、`409 CASE_EXPIRED`（觀察已到期，須另開新案）
 - `409 STANCE_REQUIRED`、`409 STANCE_HAS_NO_EVIDENCE`（`CANNOT_CONFIRM` 不收照片）、`409 PHOTO_LIMIT_REACHED`
@@ -276,12 +278,14 @@ DB 約束：
 - **觸發時機**：建立案件、補件、上傳照片、改變或撤回立場、刪除照片、停權或解除停權之後，都會重新跑一次初審，寫入 `community_prechecks` 與時間軸。
 - **原回報還沒上傳照片時**：案件維持 `AWAITING_CORROBORATION`，不會立刻轉人工；如果已有 3 位有效支持者，作者卻一直沒上傳照片，就轉人工。照片已上傳但時間都不符合條件時，直接轉人工。
 - **改變立場**：舊立場撤回、另建一筆新立場，舊立場的照片不會搬過去，必須重新上傳。
-- **人工採納被暫停的觀察**：恢復發布、不重設期限，當下有效的異議會被標成 `OVERRULED`，凍結的積分解凍。
+- **人工採納**：不論案件是否已發布，當下有效的異議都會被標成 `OVERRULED`，避免下一次初審又立刻暫停。被暫停的觀察恢復發布時不重設期限，凍結的積分解凍。
 - **人工駁回已發布的觀察**：撤回發布、收回這個案件的所有積分，並給有效異議者 `UPHELD_OBJECTION` 1 分。
 - **由新案取代**：撤回發布，但已取得的積分不收回，因為取代不代表原本的證據無效。
-- **刪除照片**：先 commit 資料庫的刪除，再刪儲存物件。若社群核實的觀察因此失去原回報證據，就暫停並轉人工。
+- **刪除照片**：參與過該案件的管理員不能刪（`403 CONFLICT_OF_INTEREST`）。清除照片紀錄的同一個交易會寫入 `storage_deletion_outbox`，commit 後才刪儲存物件；失敗時保留待處理紀錄與嘗試次數，用 `python -m app.services.storage_outbox` 重試。若社群核實的觀察因此失去原回報證據，就暫停並轉人工。
+- **照片時間判定**：使用完整的原始 EXIF 字串；超長或無法解碼的值判為 `INVALID`，只有存入時才套用欄位長度限制。發布後的回應與初審一致，照片自然變舊不會顯示為失去資格。
 - **並行寫入**：每次寫入都鎖定案件那一列；積分有唯一約束，同時達到門檻也只會各發一次。
-- **公開觀察**：只列目前 `PUBLISHED` 且未到期的案件，內容只有結構化的值，不含任何自由文字、作者或補證者的身分。
+- **公開觀察**：只列目前 `PUBLISHED` 且未到期的案件，內容只有結構化的值，不含任何自由文字、作者或補證者的身分。標籤由 `observation_label` 決定。
+- **未審核文字**：revision 的說明文字只有作者與管理員看得到，其他參與者看到的是 null。
 
 ## 10. 程式對應
 

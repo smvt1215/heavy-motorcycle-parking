@@ -235,16 +235,19 @@ class PrecheckReport:
 
 
 def _counted(photos, seen: set[str], counts) -> tuple[int, int]:
-    """(counted, duplicates). A photo counts once per case by normalized SHA-256."""
+    """(counted, duplicates). A photo counts once per case by normalized SHA-256.
+
+    Every stored hash is reserved in order, including deleted and ineligible
+    photos, so a later copy of the same image never becomes independent evidence.
+    """
     counted = duplicates = 0
     for photo in photos:
-        if photo.deleted or not counts(photo):
-            continue
+        eligible = not photo.deleted and counts(photo)
         if photo.sha256 in seen:
-            duplicates += 1
+            duplicates += int(eligible)
             continue
         seen.add(photo.sha256)
-        counted += 1
+        counted += int(eligible)
     return counted, duplicates
 
 
@@ -292,7 +295,10 @@ def evaluate_case(case: CaseInput, now: datetime) -> PrecheckReport:
         if not counted:
             continue
         if stance.stance == CaseStance.SUPPORT:
-            supporters.append(stance.participant_id)
+            # Support counts only for the value actually proposed (a later revision
+            # invalidates support for an earlier value).
+            if stance.observed_value == case.proposed_value:
+                supporters.append(stance.participant_id)
         elif stance.observed_value != case.proposed_value:
             objectors.append(stance.participant_id)
     uploaded = any(not photo.deleted for photo in case.original_photos)
@@ -431,3 +437,12 @@ def normalize_value(fact_type: str, value) -> dict:
             raise ValueError("entrance_type must be VEHICLE, PEDESTRIAN, MIXED or null")
         return {"latitude": float(lat), "longitude": float(lng), "entrance_type": entrance_type}
     raise ValueError("unsupported fact type")
+
+
+def observation_label(fact_type: str, basis: PublicationBasis | None) -> str | None:
+    """Public label for an entrance-location observation; never a confirmed-access claim."""
+    if fact_type != "ENTRANCE_LOCATION":
+        return None
+    if basis == PublicationBasis.COMMUNITY_CORROBORATED:
+        return "社群核實位置・通行性未確認"
+    return "人工複審採納位置・通行性未確認"

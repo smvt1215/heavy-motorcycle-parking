@@ -13,6 +13,7 @@ from app.models.community import (
     ContributionLedgerEntry,
     IdempotencyRecord,
     SourceVerification,
+    StorageDeletion,
 )
 from app.models.data_source import DataSource
 from app.models.enums import (
@@ -77,6 +78,7 @@ __all__ = [
     "ReportType",
     "RuleKind",
     "SourceVerification",
+    "StorageDeletion",
     "User",
     "UserReport",
     "UserRole",

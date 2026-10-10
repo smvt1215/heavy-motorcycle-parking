@@ -24,6 +24,7 @@ from app.models import (
     ParkingLot,
     ParkingRule,
     ParkingZone,
+    StorageDeletion,
     UserRole,
 )
 
@@ -477,7 +478,9 @@ async def test_late_valid_corroboration_during_publication_earns_one_point(env):
 
 async def test_withdrawn_support_below_threshold_suspends_and_freezes(env):
     case = await published_case(env)
-    response = await env["client"].delete(f"/api/v1/community/cases/{case['id']}/stance", headers=auth(env, "bob"))
+    response = await env["client"].delete(
+        f"/api/v1/community/cases/{case['id']}/stance", headers=auth(env, "bob", key())
+    )
     assert response.status_code == 204
     summary = (await detail(env, case["id"]))["case"]
     assert summary["publication_status"] == "SUSPENDED" and summary["review_status"] == "MANUAL_REVIEW"
@@ -770,3 +773,122 @@ async def test_unmoderated_text_is_private_to_the_author(env):
     outsider = await env["client"].get(f"/api/v1/me/community/cases/{case['id']}", headers=auth(env, "carol"))
     assert outsider.status_code == 403
     assert (await moderation(env, case["id"]))["revisions"][0]["description"] == "作者的私人說明"
+
+
+# --- review fixes (PR #43) ---------------------------------------------------------------------
+
+
+async def test_support_must_report_the_proposed_value(env):
+    case = await create(env)
+    response = await env["client"].put(
+        f"/api/v1/community/cases/{case['id']}/stance",
+        json={"stance": "SUPPORT", "observed_value": {"present": False}},
+        headers=auth(env, "bob", key()),
+    )
+    assert response.status_code == 422 and response.json()["error"]["code"] == "SUPPORT_VALUE_MISMATCH"
+
+
+def _jpeg_with_raw_exif(subsec):
+    image = Image.new("RGB", (40, 30), (next(_colors) % 256, 1, 2))
+    exif = Image.Exif()
+    ifd = exif.get_ifd(0x8769)
+    ifd[36867] = (NOW - timedelta(hours=1)).astimezone(TAIPEI).strftime("%Y:%m:%d %H:%M:%S")
+    ifd[36881] = "+08:00"
+    ifd[37521] = subsec
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", exif=exif)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("subsec", ["1" * 40, "12a"])
+async def test_overlong_or_malformed_subseconds_are_invalid_not_ignored(env, subsec):
+    case = await create(env)
+    photo = await upload(env, case["id"], "alice", "revision", _jpeg_with_raw_exif(subsec))
+    assert photo["metadata_time"]["status"] == "INVALID" and photo["counts_toward_corroboration"] is False
+
+
+async def test_idempotent_replay_bypasses_the_rate_limit(env):
+    payload = {"parking_id": env["lots"][0].id, "fact_type": "LIGHTING", "proposed_value": LIGHT}
+    first = await env["client"].post("/api/v1/community/cases", json=payload, headers=auth(env, "alice", "rl"))
+    env["app"].state.community_rate_limiter.allowed = False
+    replay = await env["client"].post("/api/v1/community/cases", json=payload, headers=auth(env, "alice", "rl"))
+    assert replay.status_code == 201 and replay.json() == first.json()
+    fresh = await env["client"].post("/api/v1/community/cases", json=payload, headers=auth(env, "alice", "rl2"))
+    assert fresh.status_code == 429
+
+
+async def test_stance_withdrawal_is_idempotent(env):
+    case = await published_case(env)
+    path = f"/api/v1/community/cases/{case['id']}/stance"
+    missing = await env["client"].delete(path, headers=auth(env, "bob"))
+    assert missing.status_code == 428
+    first = await env["client"].delete(path, headers=auth(env, "bob", "wd"))
+    again = await env["client"].delete(path, headers=auth(env, "bob", "wd"))
+    assert first.status_code == again.status_code == 204
+    other = await env["client"].delete(path, headers=auth(env, "bob", "wd2"))
+    assert other.status_code == 404
+
+
+async def test_source_verification_rejects_unknown_references(env):
+    base = {"fact_kind": "FACILITY", "evidence_url": "https://operator.example/lot"}
+    for body, code in (
+        ({**base, "source_id": 999999}, "SOURCE_NOT_FOUND"),
+        ({**base, "source_id": env["source"].id, "parking_id": 999999}, "PARKING_NOT_FOUND"),
+    ):
+        response = await env["client"].post(
+            "/api/v1/moderation/source-verifications", json=body, headers=auth(env, "mod")
+        )
+        assert response.status_code == 404 and response.json()["error"]["code"] == code
+
+
+async def test_participating_moderator_cannot_delete_case_evidence(env):
+    case = await create(env)
+    photo = await upload(env, case["id"], "alice", "revision")
+    await stance(env, case["id"], "mod2", "CANNOT_CONFIRM")
+    response = await env["client"].delete(f"/api/v1/moderation/photos/{photo['photo_id']}", headers=auth(env, "mod2"))
+    assert response.status_code == 403 and response.json()["error"]["code"] == "CONFLICT_OF_INTEREST"
+
+
+async def test_accepting_an_unpublished_case_overrules_its_objection(env):
+    case = await create(env)
+    await upload(env, case["id"], "alice", "revision")
+    await support(env, case["id"], "bob", value="OPPOSE", observed={"present": False})
+    assert (await detail(env, case["id"]))["case"]["review_status"] == "MANUAL_REVIEW"
+    accepted = await decide(env, case["id"], "ACCEPT")
+    assert accepted["publication_status"] == "PUBLISHED"
+    # The next precheck (any later write) must not suspend it again for the overruled objection.
+    await stance(env, case["id"], "carol", "CANNOT_CONFIRM")
+    assert (await detail(env, case["id"]))["case"]["publication_status"] == "PUBLISHED"
+
+
+async def test_photo_eligibility_in_views_follows_publication(env):
+    case = await create(env)
+    await upload(env, case["id"], "alice", "revision", jpeg(taken=NOW - timedelta(days=25)))
+    for name in ("bob", "carol", "dave"):
+        await support(env, case["id"], name, jpeg(taken=NOW - timedelta(days=25)))
+    env["clock"][0] = NOW + timedelta(days=10)
+    photo = (await detail(env, case["id"]))["my_photos"][0]
+    assert photo["counts_toward_corroboration"] is True and photo["message_code"] == "ELIGIBLE"
+
+
+async def test_failed_object_deletion_stays_pending_until_retried(env):
+    from app.services.storage_outbox import drain
+
+    case = await create(env)
+    photo = await upload(env, case["id"], "alice", "revision")
+    storage = env["app"].state.object_storage
+    stored_key = next(iter(storage.objects))
+
+    async def failing_delete(key):
+        raise RuntimeError("transient")
+
+    storage.delete, original = failing_delete, storage.delete
+    response = await env["client"].delete(f"/api/v1/moderation/photos/{photo['photo_id']}", headers=auth(env, "mod"))
+    assert response.status_code == 204
+    entry = (await env["session"].scalars(select(StorageDeletion))).one()
+    assert entry.storage_key == stored_key and entry.completed_at is None and entry.attempts == 1
+    assert entry.last_error == "RuntimeError" and stored_key in storage.objects
+    storage.delete = original
+    assert await drain(env["session"], storage, NOW + timedelta(minutes=5)) == (1, 0)
+    await env["session"].refresh(entry)
+    assert entry.completed_at is not None and stored_key not in storage.objects

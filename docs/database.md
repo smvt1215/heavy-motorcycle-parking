@@ -221,11 +221,17 @@ Lot deletion cascades zones, cases and their community records. No legacy
 photo time. Downgrading to `005_vehicle_classes` removes the community tables,
 enums and trigger function while retaining legacy reports.
 
-## Participant suspension (007)
+## Community moderation (007)
 
-`007_participant_suspension` adds nullable `community_participants.suspended_at`
+`007_community_moderation` adds nullable `community_participants.suspended_at`
 and `suspended_reason`, set together (`ck_community_participants_suspension_has_reason`).
 A suspended participant cannot submit cases, stances or photos, and their active
 stances stop counting toward corroboration or objections. `community_cases.updated_at`
 is written explicitly with the request instant (no ORM `onupdate`); the column
 and its server default are unchanged.
+
+`storage_deletion_outbox` (unique `storage_key`, `requested_at`, nullable
+`completed_at` not before the request, `attempts >= 0`, short `last_error`) makes
+evidence deletion durable: the photo row is cleared and the key recorded in one
+transaction, the object is removed afterwards, and pending rows are retried by
+`python -m app.services.storage_outbox`.

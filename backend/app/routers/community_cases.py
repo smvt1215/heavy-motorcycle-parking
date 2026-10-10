@@ -1,6 +1,5 @@
 """Community verification endpoints. Business rules live in app.services.community_cases."""
 
-import contextlib
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, Header, Path, Query, Request, Response, UploadFile, status
@@ -50,6 +49,7 @@ from app.schemas.community_cases import (
 from app.schemas.error import ErrorResponse
 from app.services.community_cases import CaseDetail, CaseView, CommunityCaseService, ModerationService, PhotoView
 from app.services.idempotency import IdempotencyService, unit_of_work
+from app.services.storage_outbox import drain
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -91,10 +91,15 @@ Moderation = Annotated[ModerationService, Depends(_moderation)]
 
 
 async def write_limit(request: Request, user: CurrentUser) -> None:
-    if not await request.app.state.community_rate_limiter.allow(f"user:{user.id}"):
+    await _limit(request, user.id)
+
+
+async def _limit(request: Request, user_id: int) -> None:
+    if not await request.app.state.community_rate_limiter.allow(f"user:{user_id}"):
         raise DiscoveryError("RATE_LIMITED", "Too many community submissions; try again shortly.", 429)
 
 
+# Only for non-idempotent writes; idempotent routes rate-limit after the replay check.
 RateLimited = Depends(write_limit)
 
 
@@ -190,7 +195,6 @@ def _json(status_code: int, model) -> tuple[int, dict]:
     status_code=status.HTTP_201_CREATED,
     tags=["community"],
     responses=ERRORS,
-    dependencies=[RateLimited],
 )
 async def create_case(
     request: Request, body: CaseCreate, user: CurrentUser, cases: Cases, session: Session, key: IdempotencyKey = None
@@ -202,7 +206,7 @@ async def create_case(
         return _json(201, _summary(view))
 
     code, payload = await IdempotencyService(session).run(
-        user.id, "create_case", key, body.model_dump(mode="json"), now, handler
+        user.id, "create_case", key, body.model_dump(mode="json"), now, handler, lambda: _limit(request, user.id)
     )
     return JSONResponse(payload, status_code=code)
 
@@ -213,7 +217,6 @@ async def create_case(
     status_code=status.HTTP_201_CREATED,
     tags=["community"],
     responses=ERRORS,
-    dependencies=[RateLimited],
 )
 async def revise_case(
     request: Request,
@@ -230,7 +233,9 @@ async def revise_case(
         return _json(201, _summary(await cases.revise(user, now, case_id, **body.model_dump())))
 
     payload = {"case_id": case_id, **body.model_dump(mode="json")}
-    code, response = await IdempotencyService(session).run(user.id, "revise_case", key, payload, now, handler)
+    code, response = await IdempotencyService(session).run(
+        user.id, "revise_case", key, payload, now, handler, lambda: _limit(request, user.id)
+    )
     return JSONResponse(response, status_code=code)
 
 
@@ -268,7 +273,6 @@ async def upload_case_photo(
     response_model=StanceResponse,
     tags=["community"],
     responses=ERRORS,
-    dependencies=[RateLimited],
 )
 async def set_stance(
     request: Request,
@@ -285,7 +289,9 @@ async def set_stance(
         return _json(200, _stance(await cases.set_stance(user, now, case_id, body.stance, body.observed_value)))
 
     payload = {"case_id": case_id, **body.model_dump(mode="json")}
-    code, response = await IdempotencyService(session).run(user.id, "set_stance", key, payload, now, handler)
+    code, response = await IdempotencyService(session).run(
+        user.id, "set_stance", key, payload, now, handler, lambda: _limit(request, user.id)
+    )
     return JSONResponse(response, status_code=code)
 
 
@@ -295,8 +301,17 @@ async def set_stance(
     tags=["community"],
     responses=ERRORS,
 )
-async def withdraw_stance(request: Request, case_id: CaseID, user: CurrentUser, cases: Cases, session: Session):
-    await unit_of_work(session, lambda: cases.withdraw_stance(user, request.state.received_at, case_id))
+async def withdraw_stance(
+    request: Request, case_id: CaseID, user: CurrentUser, cases: Cases, session: Session, key: IdempotencyKey = None
+):
+    now = request.state.received_at
+
+    async def handler():
+        await cases.withdraw_stance(user, now, case_id)
+        return 204, {}
+
+    # A lost 204 retried with the same key replays 204 instead of 404 STANCE_NOT_FOUND.
+    await IdempotencyService(session).run(user.id, "withdraw_stance", key, {"case_id": case_id}, now, handler)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -371,13 +386,6 @@ async def community_observations(request: Request, parking_id: Annotated[int, Pa
     items = []
     for observation in await cases.public_observations(parking_id, request.state.received_at):
         case = observation.case
-        label = None
-        if case.fact_type == "ENTRANCE_LOCATION":
-            label = (
-                "社群核實位置・通行性未確認"
-                if case.publication_basis == "COMMUNITY_CORROBORATED"
-                else "人工複審採納位置・通行性未確認"
-            )
         items.append(
             CommunityObservation(
                 observation_id=case.id,
@@ -391,7 +399,7 @@ async def community_observations(request: Request, parking_id: Annotated[int, Pa
                 corroborator_count=observation.corroborators,
                 first_published_at=case.first_published_at,
                 published_until=case.published_until,
-                label=label,
+                label=observation.label,
             )
         )
     return CommunityObservationsResponse(items=items)
@@ -522,11 +530,12 @@ async def moderation_decision(
 async def delete_photo(
     request: Request, photo_id: Annotated[int, Path(gt=0)], user: CurrentUser, moderation: Moderation, session: Session
 ):
-    key = await unit_of_work(session, lambda: moderation.delete_photo(user, request.state.received_at, photo_id))
-    # The row is committed as deleted first; the object goes next and is never served again.
-    if key is not None and request.app.state.object_storage is not None:
-        with contextlib.suppress(Exception):
-            await request.app.state.object_storage.delete(key)
+    now = request.state.received_at
+    outbox_id = await unit_of_work(session, lambda: moderation.delete_photo(user, now, photo_id))
+    # The cleared row and its outbox entry are committed first; the object is removed next.
+    # A failure leaves the entry pending for `python -m app.services.storage_outbox`.
+    if outbox_id is not None:
+        await drain(session, request.app.state.object_storage, now, [outbox_id])
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

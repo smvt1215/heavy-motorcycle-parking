@@ -31,6 +31,7 @@ from app.domain.community import (
     effective_points,
     evaluate_case,
     normalize_value,
+    observation_label,
     publication_term_end,
 )
 from app.domain.errors import DiscoveryError, forbidden, not_found
@@ -44,8 +45,10 @@ from app.models import (
     CommunityPrecheck,
     CommunityPrecheckResult,
     ContributionLedgerEntry,
+    DataSource,
     ParkingEntrance,
     SourceVerification,
+    StorageDeletion,
 )
 from app.models.enums import (
     LOW_RISK_FACT_TYPES,
@@ -121,6 +124,7 @@ class Observation:
     case: CommunityCase
     revision: CommunityCaseRevision
     corroborators: int | None
+    label: str | None
 
 
 @dataclass(frozen=True)
@@ -292,7 +296,10 @@ class CommunityCaseService:
             raise storage_unavailable()
         processed = await process_photo_async(data, self.max_photo_bytes)
         exif = processed.exif_time
-        time = classify_photo_time(exif.datetime_original, exif.offset_time_original, exif.subsec_time_original, now)
+        # Classify the full raw values; only storage applies the column length limits.
+        time = classify_photo_time(
+            exif.raw_datetime_original, exif.raw_offset_time_original, exif.raw_subsec_time_original, now
+        )
         duplicate = any(p.normalized_sha256 == processed.sha256 for p in await self.repo.photos(row.id))
         key = f"community/{row.id}/{uuid.uuid4().hex}.jpg"
         await self.storage.put(key, processed.body, processed.content_type)
@@ -340,6 +347,10 @@ class CommunityCaseService:
             if observed_value is None:
                 raise invalid("VALUE_INVALID", "SUPPORT and OPPOSE need an observed value.")
             value = await self._value(row.fact_type, observed_value, row.parking_id)
+            proposed = (await self.repo.revision(row.id, row.current_revision)).proposed_value
+            if stance == CaseStance.SUPPORT and value != proposed:
+                # Support for a different value is an objection, not corroboration.
+                raise invalid("SUPPORT_VALUE_MISMATCH", "SUPPORT must report the proposed value; use OPPOSE.")
         current = await self.repo.active_stance(row.id, participant.id)
         if current is not None:
             current.withdrawn_at = now
@@ -393,7 +404,7 @@ class CommunityCaseService:
         return CaseDetail(
             view=await self._stored_view(row, now),
             revisions=await self.repo.revisions(row.id),
-            photos=[self._photo_view(photo, now) for photo in photos],
+            photos=[self._photo_view(photo, now, row) for photo in photos],
             events=await self.repo.events(row.id),
             my_stance=await self.repo.active_stance(row.id, participant.id),
             viewer_participant_id=participant.id,
@@ -416,7 +427,9 @@ class CommunityCaseService:
             corroborators = None
             if row.publication_basis == PublicationBasis.COMMUNITY_CORROBORATED:
                 corroborators = await self._supporters_from_latest(row.id)
-            observations.append(Observation(row, revision, corroborators))
+            observations.append(
+                Observation(row, revision, corroborators, observation_label(row.fact_type, row.publication_basis))
+            )
         return observations
 
     async def photo_content(self, principal: AuthenticatedUser, photo_id: int) -> tuple[bytes, str]:
@@ -650,12 +663,15 @@ class CommunityCaseService:
                 return int(result.detail.get("supporters", 0))
         return None
 
-    def _photo_view(self, photo: CommunityEvidencePhoto, now: datetime) -> PhotoView:
+    def _photo_view(self, photo: CommunityEvidencePhoto, now: datetime, row: CommunityCase) -> PhotoView:
         eligible = photo.deleted_at is None and photo.time_status == PhotoTimeStatus.VALID
         if photo.deleted_at is not None:
             return PhotoView(photo, False, "DELETED")
         if not eligible:
             return PhotoView(photo, False, "MANUAL_REVIEW_REQUIRED")
+        if row.publication_state != CasePublicationState.UNPUBLISHED:
+            # Mirrors precheck: once published, natural ageing never revokes eligibility.
+            return PhotoView(photo, True, "ELIGIBLE")
         within = counts_at_publication(photo.time_status, photo.captured_at, now)
         return PhotoView(photo, within, "ELIGIBLE" if within else "OUTSIDE_PUBLICATION_WINDOW")
 
@@ -696,7 +712,7 @@ class ModerationService(CommunityCaseService):
         return CaseDetail(
             view=await self._stored_view(row, now),
             revisions=await self.repo.revisions(row.id),
-            photos=[self._photo_view(photo, now) for photo in await self.repo.photos(row.id)],
+            photos=[self._photo_view(photo, now, row) for photo in await self.repo.photos(row.id)],
             events=await self.repo.events(row.id),
             my_stance=None,
             stances=await self.repo.stances(row.id),
@@ -748,12 +764,15 @@ class ModerationService(CommunityCaseService):
             ):
                 raise conflict("INVALID_DECISION", "This case is already accepted and published.")
             await self._event(row, now, CaseEventType.MANUAL_ACCEPTED, moderator.id, **reason)
+            # Accepting rules on the objections in front of the moderator, published or not,
+            # so the next precheck does not immediately suspend the accepted observation.
+            for stance in await self.repo.stances(row.id, active_only=True):
+                if stance.stance == CaseStance.OPPOSE:
+                    stance.invalidated_at = now
+                    stance.invalidated_reason = "OVERRULED"
+                    await self._event(row, now, CaseEventType.STANCE_INVALIDATED, moderator.id)
+            await self.session.flush()
             if row.publication_state == CasePublicationState.SUSPENDED:
-                for stance in await self.repo.stances(row.id, active_only=True):
-                    if stance.stance == CaseStance.OPPOSE:
-                        stance.invalidated_at = now
-                        stance.invalidated_reason = "OVERRULED"
-                await self.session.flush()
                 row.publication_state = CasePublicationState.PUBLISHED
                 row.review_status = CaseReviewStatus.ACCEPTED
                 await self._unfreeze(row, now)
@@ -806,12 +825,15 @@ class ModerationService(CommunityCaseService):
             len(report.supporters),
         )
 
-    async def delete_photo(self, principal: AuthenticatedUser, now: datetime, photo_id: int) -> str | None:
+    async def delete_photo(self, principal: AuthenticatedUser, now: datetime, photo_id: int) -> int | None:
+        """Clear the photo and record its object for durable removal; returns the outbox id."""
         moderator = await self._moderator(principal)
         photo = await self.repo.photo(photo_id, for_update=True)
         if photo is None or photo.deleted_at is not None:
             raise not_found("PHOTO_NOT_FOUND", "The photo was not found.")
         row = await self._locked_case(photo.case_id)
+        if await self.repo.is_participant(row.id, moderator.id):
+            raise DiscoveryError("CONFLICT_OF_INTEREST", "You took part in this case and cannot moderate it.", 403)
         key = photo.storage_key
         photo.deleted_at = now
         photo.storage_key = None
@@ -822,10 +844,17 @@ class ModerationService(CommunityCaseService):
         await self.session.flush()
         await self._event(row, now, CaseEventType.PHOTO_DELETED, moderator.id, payload={"photo_id": photo.id})
         await self._precheck(row, now)
-        return key
+        if key is None:
+            return None
+        outbox = await self.repo.add(StorageDeletion(storage_key=key, requested_at=now, created_at=now))
+        return outbox.id
 
     async def add_source_verification(self, principal: AuthenticatedUser, now: datetime, **fields):
         moderator = await self._moderator(principal)
+        if await self.session.get(DataSource, fields["source_id"]) is None:
+            raise not_found("SOURCE_NOT_FOUND", "The data source was not found.")
+        if fields.get("parking_id") is not None and not await self.users.lot_exists(fields["parking_id"]):
+            raise not_found("PARKING_NOT_FOUND", "The parking lot was not found.")
         if fields.get("zone_id") is not None and not await self.reports.zone_in_lot(
             fields["zone_id"], fields["parking_id"]
         ):

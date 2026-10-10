@@ -166,3 +166,25 @@ def test_deleting_the_original_evidence_suspends_a_community_publication():
     three = (support(2), support(3), support(4))
     gone = replace(published(*three), original_photos=(photo(1, deleted=True),))
     assert evaluate_case(gone, NOW).decision == Decision.SUSPEND
+
+
+def test_support_counts_only_for_the_proposed_value():
+    contradictory = (support(2, value={"present": False}), support(3), support(4))
+    assert evaluate_case(case(*contradictory), NOW).decision == Decision.AWAIT
+
+
+def test_deleted_or_ineligible_hashes_still_reserve_the_image():
+    deleted_original = (photo(7, deleted=True), photo(1))
+    stances = (support(2, photo(7)), support(3), support(4))
+    assert evaluate_case(case(*stances, original=deleted_original), NOW).decision == Decision.AWAIT
+    ineligible = (photo(1), photo(8, status=Time.MISSING))
+    stances = (support(2, photo(8)), support(3), support(4))
+    assert evaluate_case(case(*stances, original=ineligible), NOW).decision == Decision.AWAIT
+
+
+def test_observation_labels_never_claim_confirmed_access():
+    from app.domain.community import observation_label
+
+    assert observation_label("LIGHTING", Basis.COMMUNITY_CORROBORATED) is None
+    assert observation_label("ENTRANCE_LOCATION", Basis.COMMUNITY_CORROBORATED) == "社群核實位置・通行性未確認"
+    assert observation_label("ENTRANCE_LOCATION", Basis.MANUAL_REVIEW) == "人工複審採納位置・通行性未確認"

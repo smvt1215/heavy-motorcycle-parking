@@ -61,7 +61,12 @@ class IdempotencyService:
         payload: Any,
         now: datetime,
         handler: Handler,
+        guard: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[int, dict[str, Any]]:
+        """Replay a stored result, or run `guard` (e.g. rate limiting) and then `handler`.
+
+        A replay never reaches the guard, so retries always return the original result.
+        """
         if key is None:
             raise key_required()
         if not KEY_PATTERN.fullmatch(key):
@@ -73,6 +78,8 @@ class IdempotencyService:
         if stored is not None:
             return stored
         try:
+            if guard is not None:
+                await guard()
             status, body = await handler()
             self.session.add(
                 IdempotencyRecord(
@@ -96,6 +103,11 @@ class IdempotencyService:
             return stored
         except BaseException:
             await self.session.rollback()
+            # A concurrent request with the same key may have committed while this one
+            # waited for the case lock and then failed (e.g. VERSION_CONFLICT): replay it.
+            stored = await self._stored(user_id, operation, key, digest, now)
+            if stored is not None:
+                return stored
             raise
         return status, body
 

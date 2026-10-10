@@ -75,8 +75,28 @@ class CommunityCaseRepository:
     async def case(self, case_id: int, *, for_update: bool = False) -> CommunityCase | None:
         statement = select(CommunityCase).where(CommunityCase.id == case_id)
         if for_update:
+            await self.lock_case_scopes([case_id])
             statement = statement.with_for_update()
         return (await self.session.scalars(statement)).one_or_none()
+
+    async def lock_parking_scopes(self, parking_ids: Iterable[int]) -> None:
+        """Serialize observation writes by lot, before locking or inserting cases.
+
+        NO KEY UPDATE permits foreign-key KEY SHARE locks while excluding other
+        observation writers. Multiple scopes always lock in parking ID order.
+        """
+        await self.session.execute(
+            select(ParkingLot.id)
+            .where(ParkingLot.id.in_(parking_ids))
+            .order_by(ParkingLot.id)
+            .with_for_update(key_share=True)
+        )
+
+    async def lock_case_scopes(self, case_ids: Iterable[int]) -> None:
+        parking_ids = await self.session.scalars(
+            select(CommunityCase.parking_id).where(CommunityCase.id.in_(case_ids)).distinct()
+        )
+        await self.lock_parking_scopes(parking_ids.all())
 
     async def revisions(self, case_id: int) -> list[CommunityCaseRevision]:
         return list(

@@ -1,7 +1,10 @@
 """Community verification API: corroboration, objections, review, points, media and identity."""
 
+import asyncio
+import contextlib
 import io
 import itertools
+import uuid
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,7 +13,7 @@ from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 from PIL import Image
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.auth.tokens import AccessTokenService
@@ -18,13 +21,16 @@ from app.config import settings
 from app.db import get_session
 from app.main import create_app
 from app.models import (
+    CommunityCase,
     CommunityEvidencePhoto,
+    CommunityParticipant,
     ContributionLedgerEntry,
     DataSource,
     ParkingLot,
     ParkingRule,
     ParkingZone,
     StorageDeletion,
+    User,
     UserRole,
 )
 
@@ -1010,3 +1016,254 @@ async def test_suspension_is_refused_when_it_would_recount_the_moderators_case(e
     )
     assert response.status_code == 403 and response.json()["error"]["code"] == "CONFLICT_OF_INTEREST"
     assert (await detail(env, case["id"]))["case"]["publication_status"] == "PUBLISHED"
+
+
+@pytest.mark.parametrize("failure", ["put", "precheck"])
+async def test_failed_upload_and_failed_cleanup_leave_a_durable_deletion(env, monkeypatch, failure):
+    from app.services.community_cases import CommunityCaseService
+    from app.services.storage_outbox import drain
+
+    case = await create(env)
+    storage = env["app"].state.object_storage
+    original_put, original_delete = storage.put, storage.delete
+
+    async def failing_put(*args):
+        await original_put(*args)
+        raise RuntimeError("upload response lost")
+
+    async def failing_precheck(*args):
+        raise RuntimeError("precheck failed")
+
+    async def failing_delete(key):
+        raise RuntimeError("cleanup unavailable")
+
+    monkeypatch.setattr(storage, "delete", failing_delete)
+    if failure == "put":
+        monkeypatch.setattr(storage, "put", failing_put)
+    else:
+        monkeypatch.setattr(CommunityCaseService, "_precheck", failing_precheck)
+    with pytest.raises(RuntimeError):
+        await env["client"].post(
+            f"/api/v1/community/cases/{case['id']}/photos",
+            files={"file": ("p.jpg", jpeg(), "image/jpeg")},
+            data={"owner": "revision"},
+            headers=auth(env, "alice"),
+        )
+    (stored_key,) = storage.objects
+    entry = (await env["session"].scalars(select(StorageDeletion))).one()
+    assert entry.storage_key == stored_key and entry.completed_at is None
+    assert (await env["session"].scalars(select(CommunityEvidencePhoto))).all() == []
+    monkeypatch.setattr(storage, "delete", original_delete)
+    assert await drain(env["session"], storage, NOW) == (1, 0)
+    assert storage.objects == {}
+
+
+@pytest.mark.parametrize("kind", ["revised_support", "same_value_objection"])
+async def test_noncounting_stance_evidence_is_false_in_participant_and_moderator_views(env, kind):
+    case = await create(env)
+    if kind == "revised_support":
+        await support(env, case["id"], "bob")
+        await decide(env, case["id"], "REQUEST_EVIDENCE")
+        response = await env["client"].post(
+            f"/api/v1/community/cases/{case['id']}/revisions",
+            json={"proposed_value": {"present": False}},
+            headers=auth(env, "alice", key()),
+        )
+        assert response.status_code == 201
+    else:
+        await support(env, case["id"], "bob", value="OPPOSE", observed=LIGHT)
+    own = (await detail(env, case["id"], "bob"))["my_photos"][0]
+    assert own["counts_toward_corroboration"] is False and own["message_code"] == "NOT_COUNTED"
+    photos = (await moderation(env, case["id"]))["photos"]
+    assert len(photos) == 1 and photos[0]["counts_toward_corroboration"] is False
+
+
+async def test_accept_overrules_only_valid_objections_and_preserves_pending_evidence(env):
+    case = await create(env)
+    await support(env, case["id"], "bob", value="OPPOSE", observed={"present": False})
+    await support(env, case["id"], "carol", value="OPPOSE", observed=LIGHT)
+    await stance(env, case["id"], "dave", "OPPOSE", {"present": False})
+    await decide(env, case["id"], "ACCEPT")
+    assert (await detail(env, case["id"], "bob"))["my_stance"] is None
+    assert (await detail(env, case["id"], "carol"))["my_stance"] is not None
+    assert (await detail(env, case["id"], "dave"))["my_stance"] is not None
+    await upload(env, case["id"], "dave", "stance")
+    assert (await detail(env, case["id"]))["case"]["publication_status"] == "SUSPENDED"
+
+
+async def test_overruled_stance_timeline_is_attributed_to_the_moderator(env):
+    case = await create(env)
+    await support(env, case["id"], "bob", value="OPPOSE", observed={"present": False})
+    await decide(env, case["id"], "ACCEPT")
+    events = (await detail(env, case["id"]))["timeline"]
+    (invalidated,) = [event for event in events if event["event_type"] == "STANCE_INVALIDATED"]
+    assert invalidated["actor"] == "MODERATOR"
+
+
+async def test_manual_resume_without_original_evidence_uses_manual_basis(env):
+    case = await published_case(env)
+    photo = (await detail(env, case["id"]))["my_photos"][0]
+    response = await env["client"].delete(f"/api/v1/moderation/photos/{photo['photo_id']}", headers=auth(env, "mod"))
+    assert response.status_code == 204
+    before = (await detail(env, case["id"]))["case"]
+    assert before["publication_status"] == "SUSPENDED" and before["supporters"] == 3
+    resumed = await decide(env, case["id"], "ACCEPT")
+    assert resumed["publication_basis"] == "MANUAL_REVIEW"
+    assert resumed["published_until"] == before["published_until"]
+    (observation,) = await observations(env)
+    assert observation["corroborator_count"] is None
+
+
+@pytest.mark.parametrize("auto_publish_enabled", [True, False])
+async def test_resume_preserves_valid_corroboration_after_overruling_and_natural_aging(env, auto_publish_enabled):
+    case = await published_case(env)
+    before = (await detail(env, case["id"]))["case"]["published_until"]
+    await support(env, case["id"], "erin", value="OPPOSE", observed={"present": False})
+    env["clock"][0] += timedelta(days=31)
+    env["app"].state.community_auto_publish_enabled = auto_publish_enabled
+    resumed = await decide(env, case["id"], "ACCEPT")
+    assert resumed["publication_basis"] == "COMMUNITY_CORROBORATED"
+    assert resumed["published_until"] == before
+    (observation,) = await observations(env)
+    assert observation["corroborator_count"] == 3
+    for name in ("alice", "bob", "carol", "dave"):
+        assert (await points(env, name))["points"] == 1
+
+
+@pytest.mark.parametrize("length", [129, 200, 201, 4096])
+@pytest.mark.parametrize("operation", ["create", "revise", "stance", "withdraw", "decide"])
+async def test_all_overlong_idempotency_keys_use_the_documented_error(env, operation, length):
+    case = await create(env)
+    if operation == "create":
+        method, path, body, name = (
+            "POST",
+            "/community/cases",
+            {"parking_id": env["lots"][0].id, "fact_type": "LIGHTING", "proposed_value": LIGHT},
+            "alice",
+        )
+    elif operation == "revise":
+        method, path, body, name = (
+            "POST",
+            f"/community/cases/{case['id']}/revisions",
+            {"proposed_value": LIGHT},
+            "alice",
+        )
+    elif operation == "stance":
+        method, path, body, name = (
+            "PUT",
+            f"/community/cases/{case['id']}/stance",
+            {"stance": "SUPPORT", "observed_value": LIGHT},
+            "bob",
+        )
+    elif operation == "withdraw":
+        method, path, body, name = "DELETE", f"/community/cases/{case['id']}/stance", None, "bob"
+    else:
+        method, path, body, name = (
+            "POST",
+            f"/moderation/cases/{case['id']}/decisions",
+            {"decision": "REJECT", "reason_code": "TEST", "reason_text": "Reason", "expected_version": case["version"]},
+            "mod",
+        )
+    response = await env["client"].request(method, f"/api/v1{path}", json=body, headers=auth(env, name, "k" * length))
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "IDEMPOTENCY_KEY_INVALID"
+
+
+async def test_rejecting_an_unpublished_case_awards_only_valid_upheld_objectors(env):
+    case = await create(env)
+    await support(env, case["id"], "bob", value="OPPOSE", observed={"present": False})
+    await stance(env, case["id"], "carol", "OPPOSE", {"present": False})
+    await support(env, case["id"], "dave", value="OPPOSE", observed=LIGHT)
+    rejected = await decide(env, case["id"], "REJECT")
+    assert rejected["publication_status"] == "UNPUBLISHED" and rejected["review_status"] == "REJECTED"
+    assert (await points(env, "bob"))["points"] == 1
+    for name in ("alice", "carol", "dave"):
+        assert (await points(env, name))["points"] == 0
+
+
+async def test_concurrent_conflicting_cases_publish_only_one_observation(migrated, monkeypatch):
+    """Independent committed transactions must serialize their conflict snapshots."""
+    from app.repositories.community_cases import CommunityCaseRepository
+
+    engine = create_async_engine(settings.database_url)
+    prefix = f"concurrency:{uuid.uuid4()}"
+    user_ids = []
+    lot_id = None
+    tasks = []
+    first_read, second_read, release_first = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    try:
+        async with AsyncSession(engine, expire_on_commit=False) as session:
+            lot = ParkingLot(name=prefix, city="臺北市", location="SRID=4326;POINT(121.56 25.03)")
+            session.add(lot)
+            await session.flush()
+            lot_id = lot.id
+            tokens = AccessTokenService(session)
+            users = {}
+            for name in ("alice", "frank", "bob", "carol", "dave"):
+                user = await tokens.ensure_user(f"{prefix}:{name}", display_name=name)
+                token, _ = await tokens.issue(user, NOW - timedelta(minutes=1), timedelta(days=400))
+                users[name] = (user, token)
+                user_ids.append(user.id)
+            await session.commit()
+
+        app = create_app()
+        app.state.clock = lambda: NOW
+        app.state.object_storage = MemoryStorage()
+        app.state.community_rate_limiter = AllowAll()
+        app.state.community_auto_publish_enabled = False
+
+        async def independent_session():
+            async with AsyncSession(engine, expire_on_commit=False) as session:
+                yield session
+
+        app.dependency_overrides[get_session] = independent_session
+        async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
+            concurrent_env = {"client": client, "lots": [lot], "users": users}
+            first = await create(concurrent_env)
+            second = await create(concurrent_env, "frank", proposed_value={"present": False})
+            for case, author, value in ((first, "alice", LIGHT), (second, "frank", {"present": False})):
+                await upload(concurrent_env, case["id"], author, "revision")
+                for name in ("bob", "carol", "dave"):
+                    await support(concurrent_env, case["id"], name, observed=value)
+            app.state.community_auto_publish_enabled = True
+
+            original = CommunityCaseRepository.published_for_parking
+
+            async def hold_first_snapshot(repository, parking_id, now):
+                rows = await original(repository, parking_id, now)
+                if not first_read.is_set():
+                    first_read.set()
+                    await release_first.wait()
+                else:
+                    second_read.set()
+                return rows
+
+            monkeypatch.setattr(CommunityCaseRepository, "published_for_parking", hold_first_snapshot)
+            tasks.append(asyncio.create_task(upload(concurrent_env, first["id"], "alice", "revision")))
+            await asyncio.wait_for(first_read.wait(), timeout=10)
+            tasks.append(asyncio.create_task(upload(concurrent_env, second["id"], "frank", "revision")))
+            # The second transaction should be waiting for the shared scope lock.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(second_read.wait(), timeout=1)
+            release_first.set()
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
+            first_state = (await detail(concurrent_env, first["id"]))["case"]
+            second_state = (await detail(concurrent_env, second["id"], "frank"))["case"]
+            assert first_state["publication_status"] == "PUBLISHED"
+            assert second_state["publication_status"] == "UNPUBLISHED"
+            assert second_state["review_status"] == "MANUAL_REVIEW"
+            assert len(await observations(concurrent_env)) == 1
+    finally:
+        release_first.set()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        async with AsyncSession(engine) as session:
+            if lot_id is not None:
+                await session.execute(delete(CommunityCase).where(CommunityCase.parking_id == lot_id))
+                await session.execute(delete(ParkingLot).where(ParkingLot.id == lot_id))
+            await session.execute(delete(CommunityParticipant).where(CommunityParticipant.user_id.in_(user_ids)))
+            await session.execute(delete(User).where(User.id.in_(user_ids)))
+            await session.commit()
+        await engine.dispose()

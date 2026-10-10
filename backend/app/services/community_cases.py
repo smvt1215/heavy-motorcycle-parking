@@ -2,11 +2,10 @@
 
 Contract: docs/community-verification-contract.md. Cases are community evidence
 only; nothing here writes parking rules, rates, realtime, entrances or facilities.
-Every write locks the case row, and vote counting, publication, version and
+Every write locks the parking scope before the case row; vote counting, publication, version and
 points change in the caller's single transaction (the router commits).
 """
 
-import contextlib
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -30,6 +29,7 @@ from app.domain.community import (
     derive_publication_status,
     effective_points,
     evaluate_case,
+    meets_corroboration_requirements,
     normalize_value,
     observation_label,
     publication_term_end,
@@ -193,6 +193,7 @@ class CommunityCaseService:
         if not low_risk and (vehicle is None or zone_id is None):
             raise invalid("SCOPE_INVALID", "Permission, rate and entrance-access reports need a vehicle and zone.")
         value = await self._value(fact_type, proposed_value, parking_id)
+        await self.repo.lock_parking_scopes([parking_id])
         row = await self.repo.add(
             CommunityCase(
                 parking_id=parking_id,
@@ -301,37 +302,32 @@ class CommunityCaseService:
             exif.raw_datetime_original, exif.raw_offset_time_original, exif.raw_subsec_time_original, now
         )
         key = f"community/{row.id}/{uuid.uuid4().hex}.jpg"
-        await self.storage.put(key, processed.body, processed.content_type)
-        try:
-            photo = await self.repo.add(
-                CommunityEvidencePhoto(
-                    case_id=row.id,
-                    participant_id=participant.id,
-                    storage_key=key,
-                    content_type=processed.content_type,
-                    byte_size=len(processed.body),
-                    width=processed.width,
-                    height=processed.height,
-                    normalized_sha256=processed.sha256,
-                    received_at=now,
-                    exif_datetime_original=exif.datetime_original,
-                    exif_offset_time_original=exif.offset_time_original,
-                    exif_subsec_time_original=exif.subsec_time_original,
-                    captured_at=time.captured_at,
-                    time_status=time.status,
-                    time_parser_version=TIME_PARSER_VERSION,
-                    created_at=now,
-                    **values,
-                )
-            )
-            report = await self._precheck(row, now)
-        except Exception:
-            with contextlib.suppress(Exception):
-                await self.storage.delete(key)
-            raise
-        # The caller commits; until then this object is not durably referenced. The router
-        # removes it (or records it for removal) if that commit fails.
+        # A failed put may have stored the object. Preserve its key before any I/O so
+        # outer rollback cleanup can delete it or enqueue a durable retry on every failure.
         self.uncommitted_upload_key = key
+        await self.storage.put(key, processed.body, processed.content_type)
+        photo = await self.repo.add(
+            CommunityEvidencePhoto(
+                case_id=row.id,
+                participant_id=participant.id,
+                storage_key=key,
+                content_type=processed.content_type,
+                byte_size=len(processed.body),
+                width=processed.width,
+                height=processed.height,
+                normalized_sha256=processed.sha256,
+                received_at=now,
+                exif_datetime_original=exif.datetime_original,
+                exif_offset_time_original=exif.offset_time_original,
+                exif_subsec_time_original=exif.subsec_time_original,
+                captured_at=time.captured_at,
+                time_status=time.status,
+                time_parser_version=TIME_PARSER_VERSION,
+                created_at=now,
+                **values,
+            )
+        )
+        report = await self._precheck(row, now)
         return self._photo_view(photo, now, row, report, await self.repo.photos(row.id))
 
     async def set_stance(
@@ -801,20 +797,21 @@ class ModerationService(CommunityCaseService):
             ):
                 raise conflict("INVALID_DECISION", "This case is already accepted and published.")
             await self._event(row, now, CaseEventType.MANUAL_ACCEPTED, moderator.id, **reason)
-            # Accepting rules on the objections in front of the moderator, published or not,
-            # so the next precheck does not immediately suspend the accepted observation.
+            # Only valid objections were ruled on; incomplete/noncontrary stances stay active
+            # so their participants can still supply evidence.
             for stance in await self.repo.stances(row.id, active_only=True):
-                if stance.stance == CaseStance.OPPOSE:
+                if stance.participant_id in report.objectors:
                     stance.invalidated_at = now
                     stance.invalidated_reason = "OVERRULED"
                     await self._event(row, now, CaseEventType.STANCE_INVALIDATED, moderator.id)
             await self.session.flush()
             if row.publication_state == CasePublicationState.SUSPENDED:
+                report = await self._evaluate(row, now)
                 if (
                     row.publication_basis == PublicationBasis.COMMUNITY_CORROBORATED
-                    and len(report.supporters) < CORROBORATION_THRESHOLD
+                    and not meets_corroboration_requirements(report)
                 ):
-                    # No longer a 3-person corroboration: the moderator is adopting it.
+                    # Missing original evidence or any other factual check means manual adoption.
                     row.publication_basis = PublicationBasis.MANUAL_REVIEW
                 row.publication_state = CasePublicationState.PUBLISHED
                 row.review_status = CaseReviewStatus.ACCEPTED
@@ -824,6 +821,7 @@ class ModerationService(CommunityCaseService):
                 await self._publish(row, now, PublicationBasis.MANUAL_REVIEW, report)
         elif decision == "REJECT":
             was_published = row.publication_state != CasePublicationState.UNPUBLISHED
+            upheld = frozenset(report.objectors)
             # Withdraw before changing the review status: PUBLISHED always requires ACCEPTED.
             if was_published:
                 row.publication_state = CasePublicationState.WITHDRAWN
@@ -831,14 +829,11 @@ class ModerationService(CommunityCaseService):
             row.review_status = CaseReviewStatus.REJECTED
             await self._event(row, now, CaseEventType.MANUAL_REJECTED, moderator.id, **reason)
             if was_published:
-                # An objection that exposed a published error is upheld and earns one point. A
-                # supporter who later objected keeps the award already earned (one per case) instead
-                # of losing it to the revocation.
-                upheld = frozenset(report.objectors)
+                # A supporter who later objected keeps their one-per-case award.
                 await self._revoke(row, now, keep_participants=upheld)
                 await self._event(row, now, CaseEventType.WITHDRAWN, moderator.id)
-                for participant_id in upheld:
-                    await self._award(row, participant_id, ContributionReason.UPHELD_OBJECTION, now)
+            for participant_id in upheld:
+                await self._award(row, participant_id, ContributionReason.UPHELD_OBJECTION, now)
         elif decision == "REQUEST_EVIDENCE":
             if row.publication_state != CasePublicationState.UNPUBLISHED:
                 raise conflict("INVALID_DECISION", "Published observations are accepted or rejected, not revised.")
@@ -943,6 +938,8 @@ class ModerationService(CommunityCaseService):
                     f"You took part in case {case_id}, which this suspension would recount.",
                     403,
                 )
+        # Acquire every shared scope first in parking ID order before any case locks.
+        await self.repo.lock_case_scopes(affected)
         target.suspended_at = now if reason_code else None
         target.suspended_reason = reason_code
         await self.session.flush()

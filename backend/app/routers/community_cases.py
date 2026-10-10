@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import CurrentUser
 from app.config import settings
 from app.db import get_session
+from app.domain.community import timeline_actor
 from app.domain.errors import DiscoveryError
-from app.models.enums import CaseEventType
 from app.schemas.community_cases import (
     CaseCreate,
     CaseDetailResponse,
@@ -54,17 +54,8 @@ from app.services.storage_outbox import drain, forget_uploaded_object
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_session)]
 CaseID = Annotated[int, Path(gt=0)]
-IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key", max_length=200)]
+IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key")]
 ERRORS = {code: {"model": ErrorResponse} for code in (401, 403, 404, 409, 422, 428, 429)}
-MANUAL_EVENTS = {
-    CaseEventType.MANUAL_ACCEPTED,
-    CaseEventType.MANUAL_REJECTED,
-    CaseEventType.EVIDENCE_REQUESTED,
-    CaseEventType.SUPERSEDED,
-    CaseEventType.RESUMED,
-    CaseEventType.WITHDRAWN,
-    CaseEventType.PHOTO_DELETED,
-}
 NO_STORE = {"Cache-Control": "no-store, private", "Pragma": "no-cache"}
 
 
@@ -172,14 +163,6 @@ def _revisions(detail: CaseDetail, *, show_text: bool = True) -> list[RevisionIt
         )
         for r in detail.revisions
     ]
-
-
-def _actor(event, viewer: int | None) -> Literal["SYSTEM", "YOU", "MODERATOR", "PARTICIPANT"]:
-    if event.actor_participant_id is None:
-        return "SYSTEM"
-    if event.actor_participant_id == viewer:
-        return "YOU"
-    return "MODERATOR" if event.event_type in MANUAL_EVENTS else "PARTICIPANT"
 
 
 def _json(status_code: int, model) -> tuple[int, dict]:
@@ -347,7 +330,7 @@ async def my_case(request: Request, case_id: CaseID, user: CurrentUser, cases: C
             TimelineEvent(
                 id=e.id,
                 event_type=e.event_type,
-                actor=_actor(e, detail.viewer_participant_id),
+                actor=timeline_actor(e.event_type, e.actor_participant_id, detail.viewer_participant_id),
                 revision=e.revision,
                 reason_code=e.reason_code,
                 reason_text=e.reason_text,

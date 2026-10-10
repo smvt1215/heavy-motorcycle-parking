@@ -226,3 +226,13 @@ def test_conflicting_published_observation_and_unchecked_sources_go_to_manual():
     assert same.decision == Decision.PUBLISH
     source = evaluate_case(case(*three, low=False), NOW)
     assert outcome(source, Code.SOURCE_CONFLICT).reason_code == "EXISTING_FACTS_NOT_COMPARED"
+
+
+@pytest.mark.parametrize(
+    "stance",
+    [support(2, value={"present": False}), support(2, stance=Stance.OPPOSE, value=VALUE)],
+)
+def test_noncounting_stance_photos_are_not_reported_as_counted(stance):
+    report = evaluate_case(case(stance), NOW)
+    assert report.supporters == report.objectors == ()
+    assert report.counted_photo_ids == (1,)

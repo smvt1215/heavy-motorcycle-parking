@@ -11,9 +11,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from enum import StrEnum
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 from app.models.enums import (
+    CaseEventType,
     CasePublicationState,
     CaseStance,
     ContributionEntryType,
@@ -29,6 +30,30 @@ PHOTO_WINDOW = timedelta(days=30)
 OBSERVATION_TERM = timedelta(days=90)
 IDEMPOTENCY_TTL = timedelta(hours=24)
 TIME_PARSER_VERSION = "exif-time-1"
+
+_MODERATOR_EVENTS = frozenset(
+    (
+        CaseEventType.MANUAL_ACCEPTED,
+        CaseEventType.MANUAL_REJECTED,
+        CaseEventType.EVIDENCE_REQUESTED,
+        CaseEventType.SUPERSEDED,
+        CaseEventType.RESUMED,
+        CaseEventType.WITHDRAWN,
+        CaseEventType.PHOTO_DELETED,
+        CaseEventType.STANCE_INVALIDATED,
+    )
+)
+
+
+def timeline_actor(
+    event_type: CaseEventType, actor_participant_id: int | None, viewer_participant_id: int | None
+) -> Literal["SYSTEM", "YOU", "MODERATOR", "PARTICIPANT"]:
+    if actor_participant_id is None:
+        return "SYSTEM"
+    if actor_participant_id == viewer_participant_id:
+        return "YOU"
+    return "MODERATOR" if event_type in _MODERATOR_EVENTS else "PARTICIPANT"
+
 
 _DATETIME = re.compile(r"^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$")
 _OFFSET = re.compile(r"^([+-])(\d{2}):(\d{2})$")
@@ -241,6 +266,15 @@ class PrecheckReport:
     counted_photo_ids: tuple[int, ...] = ()
 
 
+def meets_corroboration_requirements(report: PrecheckReport) -> bool:
+    """All factual checks pass; the deployment's auto-publication switch is separate."""
+    return all(
+        result.outcome == PrecheckOutcome.PASS
+        for result in report.results
+        if result.code != PrecheckCode.PUBLICATION_ELIGIBILITY
+    )
+
+
 def _counted(photos, first_copy: dict[str, int], counts, counted_ids: list[int]) -> tuple[int, int]:
     """(counted, duplicates). Only the first stored copy of an image (lowest photo ID in
     the case, including deleted, ineligible and inactive photos) can count, so a later
@@ -305,7 +339,8 @@ def evaluate_case(case: CaseInput, now: datetime) -> PrecheckReport:
             continue
         if stance.stance == CaseStance.CANNOT_CONFIRM:
             continue
-        counted, dup = _counted(stance.photos, first_copy, counts, counted_ids)
+        stance_photo_ids: list[int] = []
+        counted, dup = _counted(stance.photos, first_copy, counts, stance_photo_ids)
         duplicates += dup
         if not counted:
             continue
@@ -314,8 +349,10 @@ def evaluate_case(case: CaseInput, now: datetime) -> PrecheckReport:
             # invalidates support for an earlier value).
             if stance.observed_value == case.proposed_value:
                 supporters.append(stance.participant_id)
+                counted_ids.extend(stance_photo_ids)
         elif stance.observed_value != case.proposed_value:
             objectors.append(stance.participant_id)
+            counted_ids.extend(stance_photo_ids)
     uploaded = any(not photo.deleted for photo in case.original_photos)
     if original:
         add(PrecheckCode.PHOTO_TIME, PrecheckOutcome.PASS)

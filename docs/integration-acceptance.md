@@ -15,14 +15,14 @@
 | 檢查 | 結果與證據範圍 |
 | --- | --- |
 | Backend ruff check／format | 通過 |
-| Backend pytest | 1254 passed；含 PostGIS／Redis、migration upgrade/downgrade、舊資料保留、API及匯入測試 |
+| Backend pytest | 1267 passed；含 PostGIS／Redis、migration upgrade/downgrade、舊資料保留、API及匯入測試 |
 | Flutter analyze | No issues found |
-| Flutter test | 220 passed；涵蓋 iOS／Android widget variant、深淺色、2倍文字、語意、登入／收藏／回報及導航 URI |
+| Flutter test | 225 passed；涵蓋 iOS／Android widget variant、深淺色、2倍文字、語意、登入／收藏／回報及導航 URI |
 | Docker build | heavy-parking-api:issue27 成功；在 /tmp 匯入 API、CLI、政策 JSON 與來源 metadata 成功 |
 | Compose config | 使用 .env.example 驗證通過 |
 | Android／iOS 建置 CI | #24、#26 已通過；整合驗收 PR 以其最新 CI 結果為準 |
 
-既有 SQLAlchemy DISTINCT ON 呼叫產生83次 deprecation warning；測試通過，未改動查詢語義或排名公式。裝置偵測僅找到 Linux desktop，沒有可用 iOS／Android 實機。
+既有 SQLAlchemy DISTINCT ON 呼叫產生94次 deprecation warning；測試通過，未改動查詢語義或排名公式。裝置偵測僅找到 Linux desktop，沒有可用 iOS／Android 實機。
 
 ## 整合行為
 
@@ -42,6 +42,20 @@ API驗收的 clock／fetched_at 固定為2026-10-10T02:00:00Z，以驗證時間�
 3. 匯入批次時鐘倒退不再違反 finished_at >= started_at。保留觀測到的倒退時間及 BATCH_CLOCK_ROLLBACK，批次完成時間保守限制到起始時間；來源時間、政策評估及空位 freshness 不改寫。
 4. 個別政策許可與費率不早於首次範圍快照；新北公有場站另受2025-05-12名冊日期限制。2025-03-21公告時間獨立保存，不能據此猜更早的場站分類、轄管身份及時段；重播會收緊所有歷史版本的窗口，包括已撤回或對應失敗場站，保留原規則 ID、區間與證據。
 5. 路邊 pay／paycash 衝突時，原文保留且價格不可比較；過長展示名稱縮短路名，保留完整地址、分類與格號。三個 PR 的七項審查建議均有程式／文件修正及相應回歸驗證。
+
+## PR 審查修正
+
+| PR | 建議 | 修正與驗證 |
+| --- | --- | --- |
+| #24 | 新北 UNKNOWN 描述混淆普重／大重 | 文件明列已確認一般機車區可供普重，UNKNOWN 限未確認大重區 |
+| #24 | 切換車種清除所有車格篩選 | 三種共用分類雙向保留；僅 LIGHT_MOTO_ONLY 切到大重清除，四個 controller 回歸案例 |
+| #26 | 首次規則／費率回推至政策日 | 起日受首次 scope 快照限制；後續相同匯入不重設，API 檢查起日前後與再次匯入 |
+| #26 | 收費方式與金額原文衝突 | 五種衝突／未知組合保持 PARTIALLY_PARSED、比較金額 NULL，原文及模式保留 |
+| #26 | 展示名稱可能超過200字 | 省略過長路名，完整地址、分類、格號與來源 ID 保留，最大長度案例通過 |
+| #28 | 詳情標頭借用範圍外可停區 | 標頭保留查詢 rollup；詳情遵循車格分類，UNKNOWN 搜尋區＋範圍外 ALLOWED 區 widget 回歸通過 |
+| #28 | 已結束版本仍保留過早許可 | 正常、對應失敗、汽車區消失、場站消失四種重播都修正所有歷史窗口；不支持的窗口保留證據且停用／不可確認 |
+
+#24 手機209項、#26後端1259項、#28完整後端1267項與手機225項在各自分支通過。三個 PR 的最新提交仍須依 GitHub checks 確認雙平台建置；不自行合併。
 
 ## 真實來源抽查與資料待核對
 

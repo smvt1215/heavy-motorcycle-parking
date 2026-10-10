@@ -17,6 +17,7 @@ from app.ingestion.contracts import (
     NormalizedRate,
     NormalizedRealtime,
     NormalizedZone,
+    ParsedRate,
     ParsedRateRule,
     RecordError,
 )
@@ -24,7 +25,7 @@ from app.ingestion.new_taipei import NewTaipeiParkingAdapter, _text
 from app.ingestion.policies import RoadsideScope, apply_roadside_policy
 from app.ingestion.rate_parser import parse_rate_text
 from app.ingestion.sources import NEW_TAIPEI_ROADSIDE_SOURCE
-from app.models.enums import ParkingSpaceType, RealtimeStatus, VehicleType
+from app.models.enums import ParkingSpaceType, RateParseStatus, RateType, RealtimeStatus, VehicleType
 
 
 def charging_schedule(record: dict[str, Any]) -> dict | None:
@@ -82,6 +83,15 @@ class NewTaipeiRoadsideAdapter(NewTaipeiParkingAdapter):
         terms = self.raw_rate_text(rec)
         if terms:
             parsed = parse_rate_text(terms)
+            charging_types = {
+                "免費": {RateType.FREE},
+                "計時收費": {RateType.HOURLY, RateType.TIME_BLOCK},
+                "計次收費": {RateType.PER_ENTRY},
+            }
+            mode = rec.get("pay")
+            supported = charging_types.get(mode, set()) if isinstance(mode, str) else set()
+            if parsed.parse_status == RateParseStatus.PARSED and parsed.rate_type not in supported:
+                parsed = ParsedRate(RateParseStatus.PARTIALLY_PARSED, terms)
             parsed = replace(
                 parsed,
                 rules=(
@@ -115,9 +125,13 @@ class NewTaipeiRoadsideAdapter(NewTaipeiParkingAdapter):
                 evidence={k: rec.get(k) for k in ("id", "cellid", "name", "countycode", "pay", "day", "hour", "memo")},
             ),
         )
+        # Preserve category and cell identity in the display; the full road name
+        # remains the address and the original record is retained as evidence.
+        road_limit = 200 - len(category) - len(cell_id) - 2
+        display_road = road if len(road) <= road_limit else f"{road[: road_limit - 1]}…"
         return NormalizedLot(
             external_id=external_id,
-            name=f"{road} {category} {cell_id}",
+            name=f"{display_road} {category} {cell_id}",
             address=road,
             district=None,
             lat=lat,

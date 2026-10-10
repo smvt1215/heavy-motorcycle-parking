@@ -59,6 +59,25 @@ def test_synthetic_confirmed_ordinary_paid_motor_cell_has_separate_policy_rate()
 
 
 @pytest.mark.parametrize(
+    "pay,terms",
+    [("免費", "30元/時"), ("計次收費", "30元/時"), ("計時收費", "20元/次"), ("計時收費", "免費"), ("", "30元/時")],
+)
+def test_contradictory_or_unknown_charging_mode_has_no_confirmed_posted_price(pay, terms):
+    posted = ADAPTER.normalize_static(motor(pay=pay, paycash=terms)).zones[0].rates[0]
+    assert posted.parsed.parse_status != "PARSED"
+    assert posted.parsed.base_amount is None and posted.parsed.rate_type is None
+    assert posted.parsed.raw_text == terms and posted.raw_payload["pay"] == pay
+
+
+def test_long_display_name_preserves_full_identity_address_and_category():
+    record = motor(roadname="路" * 100, name="類" * 64, cellid="格" * 64)
+    lot = ADAPTER.normalize_static(record)
+    assert len(lot.name) <= 200 and "…" in lot.name
+    assert lot.name.endswith(f"{record['name']} {record['cellid']}")
+    assert lot.address == record["roadname"] and lot.external_id == record["id"]
+
+
+@pytest.mark.parametrize(
     "override",
     [
         {"pay": "免費", "isnowcash": "true"},

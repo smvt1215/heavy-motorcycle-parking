@@ -14,6 +14,10 @@
 
 政策許可、費率、即時及入口各用自己的 source_id。政策 scope evidence 保存在 parking_rules.notes JSON；費率原文及 scope evidence 保存在 parking_rate_sources.raw_payload。來源資訊端點可取得公告 URL。
 
+個別區域的許可與政策費率，起日取政策生效、已核對範圍與首次車格快照擷取時間的最晚者。政策公告日不能證明某個車格在過去已有相同分類、限制或時段。首次範圍時間保存為 scope_verified_from；相同範圍後續匯入不重設起日。
+
+每次匯入取得來源鎖後，檢查該來源所有政策歷史版本；即使場站已消失或對應失敗，也會收緊過早的窗口。完全早於範圍證據的許可停用、費率保持不可確認；原 ID、區間、數值及來源證據保留。其他來源不受影響。
+
 ## 新北公有路外場站核對
 
 [官方名冊（114/05/12）](https://www.traffic.ntpc.gov.tw/websitedowndoc?file=traffic%2F202505141350170.pdf&filedisplay=%E6%96%B0%E5%8C%97%E5%B8%82%E5%81%9C%E8%BB%8A%E5%A0%B4%E5%A4%A7%E5%9E%8B%E9%87%8D%E5%9E%8B%E6%A9%9F%E8%BB%8A%E6%A0%BC%E4%BD%8D%E5%8F%8A%E9%81%A9%E7%95%B6%E7%A9%BA%E9%96%93%E7%B5%B1%E8%A8%88%E8%A1%A8%281140512%29.pdf) 有71處。以行政區及唯一完整名稱核對路外來源，僅容許相同行政區名稱前綴差異；55處取得來源 ID，16處未匹配。結果及 PDF SHA-256 保存於 `backend/app/ingestion/evidence/new_taipei_managed_facilities.json`，隨 backend wheel 打包。
@@ -46,11 +50,11 @@ static 與 realtime 使用不同來源代碼，保留相同來源的原始 paylo
 | `name` | 僅精確一般機車／汽車標籤提供該類 baseline；特殊或未定義類別 UNKNOWN |
 | `countycode`、`pay`、`memo` | 政策需新北、公有來源、明確已收費的一般機車格及確認無特殊限制；未定義 memo 不授權 |
 | `day`／`hour` | 只接受明確週一至週五、週一至週六、每天及 HH:MM 時段；不明時段維持 UNKNOWN |
-| `paycash` | 獨立保留原文，既有保守 parser；不證明合法性 |
+| `paycash` | 獨立保留原文並核對 `pay`；免費／計次／計時與原文衝突或模式未知時不產生確認價格；不證明合法性 |
 | `isnowcash` | 目前收費旗標，不能證明政策範圍 |
 | `parkingstatus`／`cellstatus` | 未取得明確官方代碼定義，僅留原始證據；即時空位 UNKNOWN／NULL |
 
-新北政策的30元／4小時以 PER_ENTRY（unit_minutes=240）呈現，沒有7.5元／小時比較值。未確認時段不能產生確定價格比較值。首次匯入早於政策生效時，費率待生效後再次匯入啟用；許可本身仍保存公告生效時間。入口不足維持空集合／UNKNOWN。
+新北政策的30元／4小時以 PER_ENTRY（unit_minutes=240）呈現，沒有7.5元／小時比較值。未確認時段不能產生確定價格比較值。首次匯入早於政策生效時，費率待生效後再次匯入啟用；個別許可與費率仍須受各自範圍證據的時間限制。入口不足維持空集合／UNKNOWN。展示名稱最多200字，過長路名以省略號縮短；完整地址、車格分類與來源 ID 保留。
 
 ## 已確認資料與限制
 

@@ -89,6 +89,19 @@ async def test_verified_car_policy_keeps_sources_counts_and_rates_in_their_zones
         source_codes = {s.id: s.code for s in (await session.scalars(select(DataSource))).all()}
         assert source_codes[car["compatibility"]["provenance"]["source_id"]] == NEW_TAIPEI_PUBLIC_CAR.code
         assert source_codes[car["availability"]["provenance"]["source_id"]] == "NEW_TAIPEI_REALTIME"
+        assert car["compatibility"]["provenance"]["fetched_at"] is None
+        assert car["compatibility"]["provenance"]["source_updated_at"] is None
+        assert car["availability"]["provenance"]["fetched_at"] == "2026-10-10T02:00:00Z"
+        policy_rule = (
+            await session.scalars(
+                select(ParkingRule).where(
+                    ParkingRule.zone_id == car["zone_id"], ParkingRule.large_heavy_allowed.is_(True)
+                )
+            )
+        ).one()
+        scope = json.loads(policy_rule.notes)
+        assert scope["policy_published_on"] == "2025-03-21"
+        assert scope["scope_source"]["fetched_at"] == NOW.isoformat()
         rate_sources = (
             await session.scalars(
                 select(ParkingRateSource.source_id).join(ParkingRate).where(ParkingRate.zone_id == car["zone_id"])
@@ -152,7 +165,10 @@ async def test_roadside_policy_and_rate_have_independent_sources_and_retire_with
         policy = await session.get(DataSource, rate.source_id)
         assert policy.code == NEW_TAIPEI_ROADSIDE.code
         assert evidence.source_id == policy.id and evidence.raw_payload["scope_evidence"]["id"] == original["id"]
-        assert rate.effective_from == NEW_TAIPEI_ROADSIDE.effective_from
+        assert rate.effective_from == NOW
+        assert rate.fetched_at is rate.source_updated_at is evidence.fetched_at is evidence.source_updated_at is None
+        assert evidence.raw_payload["policy_published_on"] == "2026-06-29"
+        assert evidence.raw_payload["scope_source"]["fetched_at"] == NOW.isoformat()
     detail = await api(session, parking_id)
     zone = detail["zones"][0]
     assert zone["compatibility"]["status"] == "ALLOWED"
@@ -244,3 +260,142 @@ async def test_changed_policy_schedule_versions_both_rule_and_rate(session):
         assert rules[0].effective_to == rates[0].effective_to == NOW + timedelta(hours=1)
         assert rules[1].effective_from == rates[1].effective_from == NOW + timedelta(hours=1)
         assert "start_time" not in rules[0].schedule and rules[1].schedule["start_time"] == "07:00"
+
+
+async def test_reimport_narrows_preexisting_policy_to_reviewed_scope_date(session):
+
+    pipeline = ParkingIngestionPipeline(session, NewTaipeiParkingAdapter())
+    original = next(r for p in sample("static_sample.json")["pages"] for r in p if r["ID"] == "010152")
+    await pipeline.ingest(FeedSnapshot("static", [original], NOW, None))
+    async with session.begin():
+        policy_id = await session.scalar(select(DataSource.id).where(DataSource.code == NEW_TAIPEI_PUBLIC_CAR.code))
+        row = (await session.scalars(select(ParkingRule).where(ParkingRule.source_id == policy_id))).one()
+        row.effective_from = NEW_TAIPEI_PUBLIC_CAR.effective_from
+        rule_id = row.id
+    result = await pipeline.ingest(FeedSnapshot("static", [original], NOW + timedelta(seconds=1), None))
+    assert result.failed == 0
+    async with session.begin():
+        row = await session.get(ParkingRule, rule_id)
+        assert row.effective_from == NOW
+        assert row.large_heavy_allowed is True and row.notes and row.active
+
+
+@pytest.mark.parametrize("roadside", [False, True])
+async def test_first_policy_scope_does_not_backdate_and_unchanged_scope_retains_start(session, roadside):
+    if roadside:
+        adapter = NewTaipeiRoadsideAdapter()
+        record = {
+            **sample("roadside_sample.json")[0],
+            "name": "機車停車位",
+            "pay": "計次收費",
+            "paycash": "20元/次",
+            "day": "每天",
+            "hour": "00:00-24:00",
+            "memo": "",
+        }
+    else:
+        adapter = NewTaipeiParkingAdapter()
+        record = next(r for p in sample("static_sample.json")["pages"] for r in p if r["ID"] == "010152")
+    pipeline = ParkingIngestionPipeline(session, adapter)
+    await pipeline.ingest(FeedSnapshot("static", [record], NOW, None))
+    async with session.begin():
+        parking_id = (await session.scalars(select(ParkingLot))).one().id
+    old = await api(session, parking_id, at=NOW - timedelta(microseconds=1))
+    assert all(z["compatibility"]["status"] == "UNKNOWN" for z in old["zones"])
+    if roadside:
+        rates = await api(session, parking_id, at=NOW - timedelta(microseconds=1), endpoint="/rates")
+        assert rates["zones"][0]["rate_summary"] is None
+    await pipeline.ingest(FeedSnapshot("static", [record], NOW + timedelta(hours=1), None))
+    confirmed = await api(session, parking_id, at=NOW)
+    assert any(z["compatibility"]["status"] == "ALLOWED" for z in confirmed["zones"])
+    if roadside:
+        rates = await api(session, parking_id, at=NOW, endpoint="/rates")
+        assert rates["zones"][0]["rate_summary"] is not None
+
+
+@pytest.mark.parametrize("change", ["matched", "mismatch", "car_missing", "lot_missing"])
+async def test_reimport_narrows_closed_policy_history_even_when_scope_disappears(session, change):
+
+    pipeline = ParkingIngestionPipeline(session, NewTaipeiParkingAdapter())
+    rows = [r for page in sample("static_sample.json")["pages"] for r in page]
+    await pipeline.ingest(FeedSnapshot("static", rows, NOW, None))
+    async with session.begin():
+        policy_id = await session.scalar(select(DataSource.id).where(DataSource.code == NEW_TAIPEI_PUBLIC_CAR.code))
+        row = (await session.scalars(select(ParkingRule).where(ParkingRule.source_id == policy_id))).one()
+        row.effective_from = NEW_TAIPEI_PUBLIC_CAR.effective_from
+        parking_id, current_id = row.parking_id, row.id
+        history = []
+        for end, receipt in (
+            ("2025-04-30T00:00:00+08:00", "2025-04-01T00:00:00+08:00"),
+            ("2025-06-01T00:00:00+08:00", "2025-05-15T00:00:00+08:00"),
+        ):
+            closed = ParkingRule(
+                parking_id=row.parking_id,
+                zone_id=row.zone_id,
+                source_id=row.source_id,
+                source_record_id=row.source_record_id,
+                large_heavy_allowed=True,
+                rule_kind=row.rule_kind,
+                authority_priority=row.authority_priority,
+                active=True,
+                effective_from=NEW_TAIPEI_PUBLIC_CAR.effective_from,
+                effective_to=datetime.fromisoformat(end),
+                notes=json.dumps({**json.loads(row.notes), "scope_verified_from": receipt}),
+            )
+            session.add(closed)
+            await session.flush()
+            history.append((closed.id, closed.notes, closed.effective_to, datetime.fromisoformat(receipt)))
+    changes = {"mismatch": {"ADDRESS": "unverified address"}, "car_missing": {"TOTALCAR": "0"}}
+    incoming = [
+        ({**r, **changes.get(change, {})} if r["ID"] == "010152" else r)
+        for r in rows
+        if change != "lot_missing" or r["ID"] != "010152"
+    ]
+    result = await pipeline.ingest(FeedSnapshot("static", incoming, NOW + timedelta(seconds=1), None))
+    assert result.failed == 0
+    # No version may grant parking before the verified roster, including closed
+    # rules and facilities that cannot produce a replacement normalized rule.
+    detail = await api(session, parking_id, at=datetime.fromisoformat("2025-04-01T00:00:00+08:00"))
+    assert all(z["compatibility"]["status"] == "UNKNOWN" for z in detail["zones"])
+    floor = NOW
+    async with session.begin():
+        current = await session.get(ParkingRule, current_id)
+        assert current.effective_from == floor
+        for rule_id, notes, end, receipt in history:
+            closed = await session.get(ParkingRule, rule_id)
+            assert closed.notes == notes and closed.effective_to == end
+            if end < datetime.fromisoformat("2025-05-12T00:00:00+08:00"):
+                assert closed.active is False  # retain the unsupported interval as evidence
+            else:
+                assert closed.active is True and closed.effective_from == receipt
+
+
+async def test_unverified_closed_policy_rate_retains_evidence_without_confirmed_price(session):
+    record = {
+        **sample("roadside_sample.json")[0],
+        "name": "機車停車位",
+        "pay": "計次收費",
+        "paycash": "20元/次",
+        "day": "每天",
+        "hour": "00:00-24:00",
+        "memo": "",
+    }
+    pipeline = ParkingIngestionPipeline(session, NewTaipeiRoadsideAdapter())
+    await pipeline.ingest(FeedSnapshot("static", [record], NOW, None))
+    async with session.begin():
+        parking_id = (await session.scalars(select(ParkingLot))).one().id
+        rate = (await session.scalars(select(ParkingRate).where(ParkingRate.vehicle_type == "LARGE_HEAVY"))).one()
+        rate.effective_from = NEW_TAIPEI_ROADSIDE.effective_from
+        rate.effective_to = datetime.fromisoformat("2026-07-05T00:00:00+08:00")
+        rate_id, text, amount = rate.id, rate.raw_text, rate.base_amount
+    await pipeline.ingest(FeedSnapshot("static", [{**record, "memo": "夜間禁停"}], NOW + timedelta(hours=1), None))
+    old = await api(session, parking_id, endpoint="/rates", at=datetime.fromisoformat("2026-07-03T00:00:00+08:00"))
+    assert old["zones"][0]["compatibility"]["status"] == "UNKNOWN"
+    summary = old["zones"][0]["rate_summary"]
+    assert summary["parse_status"] == "PARTIALLY_PARSED"
+    assert summary["comparison_eligible"] is False and summary["comparison_hourly_rate_twd"] is None
+    async with session.begin():
+        rate = await session.get(ParkingRate, rate_id)
+        assert rate.parse_status == "PARTIALLY_PARSED" and rate.raw_text == text and rate.base_amount == amount
+        source = (await session.scalars(select(ParkingRateSource).where(ParkingRateSource.rate_id == rate_id))).one()
+        assert source.raw_payload["scope_history_unverified"] is True

@@ -44,12 +44,14 @@ Heavy Motorcycle Parking (重機停車通)
 29. Do not expand MVP into payments, in-app navigation, chat/social feed, AI recommendations, CarPlay, Android Auto, or prohibited-location discovery.
 
 ## Git hygiene
-After a PR is merged, and before starting the next stage (the next issue, PR or follow-up task), clean up its git state:
-- Fast-forward local `main` to `origin/main` and run `git fetch --prune`.
-- Delete the merged branch locally and on the remote (if GitHub did not already); keep only branches with open PRs.
-- Remove its worktree with `git worktree remove`, then run `git worktree prune`.
-- Delete temporary files and backup branches created for that PR once their content is verified to be in `main` or published on GitHub.
-- Before deleting anything not obviously merged, confirm its content is already in `main` (merged PR, `git cherry`, or an empty diff); otherwise ask first.
+After a PR is merged, and before starting the next stage (the next issue, PR or follow-up task), clean up its git state in this order (each step depends on the previous one):
+1. Verify, then delete temporary files and backup branches created for that PR, including untracked files inside its worktree; their content must already be in `main` or published on GitHub.
+2. Remove its worktree with `git worktree remove` (it refuses while untracked or modified files remain), then run `git worktree prune`.
+3. Run `git fetch --prune` so `origin/main` and remote branches are current.
+4. Fast-forward local `main` to the refreshed `origin/main`.
+5. Delete the merged branch locally (possible only once no worktree has it checked out) and on the remote if GitHub did not already. Keep only branches with open PRs.
+
+Before deleting anything not obviously merged, confirm its content is already in `main` (merged PR, `git cherry`, or an empty diff); otherwise ask first.
 
 ## Required PR body
 - Summary

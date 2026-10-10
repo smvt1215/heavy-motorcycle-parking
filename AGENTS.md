@@ -43,6 +43,14 @@ Heavy Motorcycle Parking (重機停車通)
 28. Lot center and entrance coordinates are distinct. Entrance accessibility is ALLOWED/NOT_ALLOWED/UNKNOWN; navigation prefers confirmed ALLOWED entrance and never labels UNKNOWN as confirmed.
 29. Do not expand MVP into payments, in-app navigation, chat/social feed, AI recommendations, CarPlay, Android Auto, or prohibited-location discovery.
 
+## Git hygiene
+After a PR is merged, and before starting the next stage (the next issue, PR or follow-up task), clean up its git state:
+- Fast-forward local `main` to `origin/main` and run `git fetch --prune`.
+- Delete the merged branch locally and on the remote (if GitHub did not already); keep only branches with open PRs.
+- Remove its worktree with `git worktree remove`, then run `git worktree prune`.
+- Delete temporary files and backup branches created for that PR once their content is verified to be in `main` or published on GitHub.
+- Before deleting anything not obviously merged, confirm its content is already in `main` (merged PR, `git cherry`, or an empty diff); otherwise ask first.
+
 ## Required PR body
 - Summary
 - Architecture impact

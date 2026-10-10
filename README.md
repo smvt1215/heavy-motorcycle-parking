@@ -124,3 +124,5 @@ All rights reserved.
 雙北政策來源、核對範圍與路邊 worker：[雙北政策與資料](docs/twin-city-policy.md)。
 
 整合結果、實機與金鑰待驗項目：[整合驗收紀錄](docs/integration-acceptance.md)。
+
+下一輪資料補齊、社群核實與 Flutter Web 初複審工作台：[實作計畫](docs/community-verification-plan.md)。
